@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+:root {
+   --color-primary: #0B3D91; /* Royal Blue - trust, stability */
+  --color-secondary: #006B3C; /* Emerald Green - growth, prosperity */
+  --color-accent: #C8A032; /* Gold - premium, success */
+  --color-accent-light: #E6C84E; /* Soft gold highlight */
+  --color-neutral: #F5F5F5; /* Light neutral for backgrounds */
+  --color-white: #FFFFFF;
+
+  /* Text Colors */
+  --text-primary: #1A1A1A; /* High-contrast dark text */
+  --text-secondary: #444444; /* Subtle gray for descriptions */
+  --text-light: #FFFFFF; /* For text on dark backgrounds */
+  --text-accent: #C8A032; /* Highlighted text color */
+
+  /* Backgrounds */
+  --bg-main: #F9FAFB; /* App background */
+  --bg-card: #FFFFFF; /* Card / container background */
+  --bg-dark: #002B5B; /* Deep blue for nav/footer */
+  --bg-highlight: #EAF5EE; /* Very light green tint */
+
+  /* Borders & Shadows */
+  --border-color: #D9D9D9;
+  --border-gold: #C8A032;
+  --shadow-color: rgba(0, 0, 0, 0.1);
+
+  /* Button Styles */
+  --btn-primary-bg: var(--color-primary);
+  --btn-primary-hover: #0A347D;
+  --btn-secondary-bg: var(--color-secondary);
+  --btn-secondary-hover: #005C33;
+  --btn-accent-bg: var(--color-accent);
+  --btn-accent-hover: #B8902D;
+
+  /* Gradients */
+  --gradient-primary: linear-gradient(135deg, #0B3D91, #006B3C);
+  --gradient-accent: linear-gradient(135deg, #C8A032, #E6C84E);
+
+  /* Transitions */
+  --transition-fast: 0.2s ease-in-out;
+  --transition-medium: 0.4s ease-in-out;
+}
+
+@theme inline {
+  --color-background: var(--bg-main);
+  --color-foreground: var(--text-primary);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+      --color-primary: #0B3D91; /* Royal Blue - trust, stability */
+  --color-secondary: #006B3C; /* Emerald Green - growth, prosperity */
+  --color-accent: #C8A032; /* Gold - premium, success */
+  --color-accent-light: #E6C84E; /* Soft gold highlight */
+  --color-neutral: #F5F5F5; /* Light neutral for backgrounds */
+  --color-white: #FFFFFF;
+
+  /* Text Colors */
+  --text-primary: #1A1A1A; /* High-contrast dark text */
+  --text-secondary: #444444; /* Subtle gray for descriptions */
+  --text-light: #FFFFFF; /* For text on dark backgrounds */
+  --text-accent: #C8A032; /* Highlighted text color */
+
+  /* Backgrounds */
+  --bg-main: #F9FAFB; /* App background */
+  --bg-card: #FFFFFF; /* Card / container background */
+  --bg-dark: #002B5B; /* Deep blue for nav/footer */
+  --bg-highlight: #EAF5EE; /* Very light green tint */
+
+  /* Borders & Shadows */
+  --border-color: #D9D9D9;
+  --border-gold: #C8A032;
+  --shadow-color: rgba(0, 0, 0, 0.1);
+
+  /* Button Styles */
+  --btn-primary-bg: var(--color-primary);
+  --btn-primary-hover: #0A347D;
+  --btn-secondary-bg: var(--color-secondary);
+  --btn-secondary-hover: #005C33;
+  --btn-accent-bg: var(--color-accent);
+  --btn-accent-hover: #B8902D;
+
+  /* Gradients */
+  --gradient-primary: linear-gradient(135deg, #0B3D91, #006B3C);
+  --gradient-accent: linear-gradient(135deg, #C8A032, #E6C84E);
+
+  /* Transitions */
+  --transition-fast: 0.2s ease-in-out;
+  --transition-medium: 0.4s ease-in-out;
+  }
+}
+
+body {
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+html{
+  scroll-behavior: smooth;
+}
