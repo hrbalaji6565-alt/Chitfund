@@ -1,7 +1,7 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { Users, Wallet, TrendingUp, Calendar, DollarSign, Award, IndianRupee } from "lucide-react"
+import { Users, Wallet, TrendingUp, Calendar, Award, IndianRupee } from "lucide-react"
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import Link from "next/link"
 import Button from "../components/ui/button"
@@ -92,7 +92,7 @@ const biddingSummaryData = [
 
 export default function DashboardPage() {
   return (
-      <div className="space-y-6">
+      <div className="space-y-6 max-w-7xl mx-auto ">
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {statsCards.map((stat, index) => (

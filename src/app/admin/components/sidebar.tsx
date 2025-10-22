@@ -43,11 +43,12 @@ const Sidebar: React.FC = () => {
   const links = [
     { href: "/admin", label: "Dashboard", icon: <LayoutDashboard size={16} /> },
     { href: "/admin/chit-groups", label: "Chit Groups", icon: <LayoutDashboard size={16} /> },
-    { href: "/members", label: "Members", icon: <Users size={16} /> },
-    { href: "/chits", label: "Chit Plans", icon: <Wallet size={16} /> },
-    { href: "/transactions", label: "Transactions", icon: <FileText size={16} /> },
-    { href: "/reports", label: "Reports", icon: <BarChart2 size={16} /> },
-    { href: "/settings", label: "Settings", icon: <Settings size={16} /> },
+    { href: "/admin/members", label: "Members", icon: <Users size={16} /> },
+    { href: "/admin/chits", label: "Chit Plans", icon: <Wallet size={16} /> },
+    { href: "/admin/transactions", label: "Transactions", icon: <FileText size={16} /> },
+    { href: "/admin/collection", label: "Collection", icon: <FileText size={16} /> },
+    { href: "/admin/invoice", label: "Invoices", icon: <FileText size={16} /> },
+    { href: "/admin/reports", label: "Reports", icon: <BarChart2 size={16} /> },
   ];
 
   const SidebarContent = () => (
