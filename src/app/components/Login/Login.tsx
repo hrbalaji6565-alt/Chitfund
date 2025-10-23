@@ -129,6 +129,9 @@ export default function AuthPage() {
                 {isLogin ? "Login" : "Sign Up"}
               </Button>
             </form>
+                 <Button className="mt-5" onClick={() => router.push('/user')}>
+                User Portal
+              </Button>
 
             <p className="text-center mt-6 text-gray-700">
               {isLogin ? "Don't have an account?" : "Already have an account?"}
@@ -138,9 +141,13 @@ export default function AuthPage() {
               >
                 {isLogin ? "Sign Up" : "Login"}
               </span>
+
+           
             </p>
           </div>
+          
         </motion.div>
+        
       </div>
     </section>
   );

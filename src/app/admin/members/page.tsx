@@ -146,20 +146,20 @@ export default function SubscribersPage() {
       <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
         <div className="flex flex-col sm:flex-row gap-3 flex-1 w-full">
           <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--text-secondary)]" />
             <Input
               placeholder="Search by name, mobile, or email..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 h-12 rounded-xl"
+              className="pl-10 h-12 rounded-xl bg-[var(--bg-card)] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]"
             />
           </div>
           <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-full sm:w-40 h-12 rounded-xl">
-              <Filter className="w-4 h-4 mr-2" />
+            <SelectTrigger className="w-full sm:w-40 h-12 rounded-xl bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]">
+              <Filter className="w-4 h-4 mr-2 text-[var(--text-secondary)]" />
               <SelectValue placeholder="Filter" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="bg-[var(--bg-card)] text-[var(--text-primary)]">
               <SelectItem value="all">All Status</SelectItem>
               <SelectItem value="Active">Active</SelectItem>
               <SelectItem value="Inactive">Inactive</SelectItem>
@@ -170,12 +170,12 @@ export default function SubscribersPage() {
         {/* Add Dialog */}
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="bg-gradient-to-r from-blue-500 to-green-500 text-white rounded-xl shadow-lg h-12 px-6">
+            <Button className="bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-secondary)] text-[var(--text-light)] rounded-xl shadow-lg h-12 px-6">
               <Plus className="w-5 h-5 mr-2" />
               Add Subscriber
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-[var(--bg-card)] text-[var(--text-primary)]">
             <DialogHeader>
               <DialogTitle>Add New Subscriber</DialogTitle>
               <DialogDescription>Add a new subscriber to the chit fund system.</DialogDescription>
@@ -184,73 +184,65 @@ export default function SubscribersPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
               {fieldConfig.map((f) => (
                 <div key={f.key} className="space-y-2">
-                  <Label htmlFor={f.key}>{f.label}</Label>
+                  <Label htmlFor={f.key} className="text-[var(--text-primary)]">{f.label}</Label>
                   <Input
                     id={f.key}
                     type={f.type}
                     placeholder={f.placeholder}
                     value={formData[f.key as keyof Subscriber] as string}
                     onChange={(e) => handleChange(f.key as keyof Subscriber, e.target.value)}
+                    className="bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)] placeholder:text-[var(--text-secondary)]"
                   />
                 </div>
               ))}
 
               <div className="space-y-2">
-                <Label>Assigned Group</Label>
+                <Label className="text-[var(--text-primary)]">Assigned Group</Label>
                 <Select
                   value={formData.assignedGroup}
                   onValueChange={(v) => handleChange("assignedGroup", v)}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]">
                     <SelectValue placeholder="Select group" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-[var(--bg-card)] text-[var(--text-primary)]">
                     {groups.map((g) => (
-                      <SelectItem key={g} value={g}>
-                        {g}
-                      </SelectItem>
+                      <SelectItem key={g} value={g}>{g}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
 
               <div className="space-y-2 md:col-span-2">
-                <Label>Address</Label>
+                <Label className="text-[var(--text-primary)]">Address</Label>
                 <Input
                   value={formData.address}
                   onChange={(e) => handleChange("address", e.target.value)}
                   placeholder="123 Main Street, City"
+                  className="bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)] placeholder:text-[var(--text-secondary)]"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label>Aadhaar Image (Required)</Label>
-                <Input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => handleFileChange("aadhaarImage", e.target.files?.[0] || null)}
-                />
+                <Label className="text-[var(--text-primary)]">Aadhaar Image (Required)</Label>
+                <Input type="file" accept="image/*" onChange={(e) => handleFileChange("aadhaarImage", e.target.files?.[0] || null)} className="bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]" />
               </div>
 
               <div className="space-y-2">
-                <Label>PAN / Other Govt ID (Optional)</Label>
-                <Input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => handleFileChange("govIdImage", e.target.files?.[0] || null)}
-                />
+                <Label className="text-[var(--text-primary)]">PAN / Other Govt ID (Optional)</Label>
+                <Input type="file" accept="image/*" onChange={(e) => handleFileChange("govIdImage", e.target.files?.[0] || null)} className="bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]" />
               </div>
 
               <div className="space-y-2">
-                <Label>Status</Label>
+                <Label className="text-[var(--text-primary)]">Status</Label>
                 <Select
                   value={formData.status}
                   onValueChange={(v: "Active" | "Inactive") => handleChange("status", v)}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-[var(--bg-card)] text-[var(--text-primary)]">
                     <SelectItem value="Active">Active</SelectItem>
                     <SelectItem value="Inactive">Inactive</SelectItem>
                   </SelectContent>
@@ -264,7 +256,7 @@ export default function SubscribersPage() {
               </Button>
               <Button
                 onClick={handleAddSubscriber}
-                className="bg-gradient-to-r from-blue-500 to-green-500 text-white"
+                className="bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-secondary)] text-[var(--text-light)]"
               >
                 Add Subscriber
               </Button>
@@ -274,48 +266,46 @@ export default function SubscribersPage() {
       </div>
 
       {/* Table */}
-      <Card className="border-0 shadow-lg">
+      <Card className="border-0 shadow-lg bg-[var(--bg-card)] text-[var(--text-primary)]">
         <CardContent className="p-0">
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gradient-to-r from-blue-50 to-green-50">
+              <thead className="bg-gradient-to-r from-[var(--bg-highlight)] to-[var(--bg-highlight)] text-[var(--text-primary)]">
                 <tr>
                   {["Name", "Contact", "Group", "Joining Date", "Status", "Actions"].map((h) => (
-                    <th key={h} className="text-left py-4 px-6 w-120 text-sm font-semibold text-gray-700">
-                      {h}
-                    </th>
+                    <th key={h} className="text-left py-4 px-6 w-120 text-sm font-semibold">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filteredSubscribers.map((s) => (
-                  <tr key={s.id} className="border-b hover:bg-gray-50 transition-colors">
+                  <tr key={s.id} className="border-b hover:bg-[var(--bg-highlight)] transition-colors">
                     <td className="py-4 px-6">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-blue-400 to-green-400 rounded-full flex items-center justify-center text-white font-semibold">
+                        <div className="w-10 h-10 bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-secondary)] rounded-full flex items-center justify-center text-[var(--text-light)] font-semibold">
                           {s.name.charAt(0)}
                         </div>
                         <div>
-                          <p className="font-medium text-gray-900">{s.name}</p>
-                          <p className="text-xs text-gray-500">{s.email}</p>
+                          <p className="font-medium">{s.name}</p>
+                          <p className="text-xs text-[var(--text-secondary)]">{s.email}</p>
                         </div>
                       </div>
                     </td>
-                    <td className="py-4 px-6 text-sm text-gray-600 flex items-center gap-2">
-                      <Phone className="w-4 h-4" />
+                    <td className="py-4 px-6 text-sm flex items-center gap-2 text-[var(--text-secondary)]">
+                      <Phone className="w-4 h-4 text-[var(--color-primary)]" />
                       {s.mobile}
                     </td>
-                    <td className="py-4 px-6 text-sm font-medium text-gray-700">{s.assignedGroup}</td>
-                    <td className="py-4 px-6 text-sm text-gray-600 flex items-center gap-2">
-                      <Calendar className="w-4 h-4" />
+                    <td className="py-4 px-6 text-sm font-medium">{s.assignedGroup}</td>
+                    <td className="py-4 px-6 text-sm flex items-center gap-2 text-[var(--text-secondary)]">
+                      <Calendar className="w-4 h-4 text-[var(--color-secondary)]" />
                       {s.joiningDate}
                     </td>
                     <td className="py-4 px-6">
                       <Badge
                         className={
                           s.status === "Active"
-                            ? "bg-green-100 text-green-700"
-                            : "bg-gray-100 text-gray-700"
+                            ? "bg-[var(--color-secondary)] text-[var(--text-light)]"
+                            : "bg-[var(--bg-muted)] text-[var(--text-secondary)]"
                         }
                       >
                         {s.status === "Active" ? <CheckCircle className="w-3 h-3 mr-1" /> : <XCircle className="w-3 h-3 mr-1" />}
@@ -324,19 +314,19 @@ export default function SubscribersPage() {
                     </td>
                     <td className="py-4 px-6">
                       <div className="flex gap-2">
-                        <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-blue-100">
-                          <Eye className="w-4 h-4 text-blue-600" />
+                        <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-[var(--bg-highlight)]">
+                          <Eye className="w-4 h-4 text-[var(--color-primary)]" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-blue-100">
-                          <Edit className="w-4 h-4 text-blue-600" />
+                        <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-[var(--bg-highlight)]">
+                          <Edit className="w-4 h-4 text-[var(--color-primary)]" />
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 hover:bg-red-100"
+                          className="h-8 w-8 hover:bg-[var(--color-accent)]"
                           onClick={() => handleDeleteSubscriber(s.id)}
                         >
-                          <Trash2 className="w-4 h-4 text-red-600" />
+                          <Trash2 className="w-4 h-4 text-[var(--color-accent)]" />
                         </Button>
                       </div>
                     </td>

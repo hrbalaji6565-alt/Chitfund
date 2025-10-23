@@ -32,13 +32,14 @@ const Sidebar: React.FC = () => {
 
   useEffect(() => setIsOpen(false), [pathname]);
 
-  // Updated link class with gradient for active link
+  // Active / inactive link classes (all from root colors)
   const linkClass = (href: string) =>
-    `flex items-center gap-2 px-3 py-4 rounded-md text-sm font-medium transition-all duration-200 ${
-      pathname === href
-        ? "bg-gradient-to-r from-blue-500 to-green-500 text-white rounded-xl font-semibold shadow-lg hover:from-blue-600 hover:to-green-600 hover:shadow-xl"
-        : "text-[var(--text-secondary)] hover:text-[var(--color-primary)] hover:bg-[var(--bg-highlight)]"
-    }`;
+  `flex items-center gap-2 px-3 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${
+    pathname === href
+      ? "bg-[var(--btn-primary-bg)] text-[var(--text-light)] shadow-md"
+      : "text-[var(--text-secondary)] hover:text-[var(--color-primary)] hover:bg-[var(--bg-highlight)]"
+  }`;
+
 
   const links = [
     { href: "/admin", label: "Dashboard", icon: <LayoutDashboard size={16} /> },
@@ -52,7 +53,7 @@ const Sidebar: React.FC = () => {
   ];
 
   const SidebarContent = () => (
-    <nav className="py-6 px-4 flex flex-col justify-between h-full mt-0 lg:mt-15">
+    <nav className="py-6 px-4 flex flex-col justify-between h-full mt-12">
       <div>
         <h2 className="text-lg font-semibold text-[var(--color-primary)] mb-6">
           Cronnis Money Maven Chits
@@ -70,11 +71,11 @@ const Sidebar: React.FC = () => {
       </div>
 
       <div>
-        <button className="flex items-center gap-2 px-3 py-2 w-full text-red-600 hover:bg-red-100 rounded-md transition-all duration-200">
+        <button className="flex items-center gap-2 px-3 py-2 w-full text-[var(--color-primary)] hover:bg-[var(--bg-highlight)] rounded-md transition-all duration-200">
           <LogOut size={16} />
           Logout
         </button>
-        <footer className="px-3 py-3 text-xs text-gray-500 border-t border-[var(--border-color)] mt-4">
+        <footer className="px-3 py-3 text-xs text-[var(--text-secondary)] border-t border-[var(--border-color)] mt-4">
           © {new Date().getFullYear()} Cronnis Money Maven Chits
         </footer>
       </div>
@@ -84,7 +85,7 @@ const Sidebar: React.FC = () => {
   return (
     <>
       {/* Mobile Topbar */}
-      <div className="lg:hidden fixed top-2 left-0 right-0 z-50 px-4 py-3 w-20">
+      <div className="lg:hidden fixed top-2 left-0 right-0 z-50 px-4 py-3">
         <button
           onClick={() => setIsOpen((prev) => !prev)}
           className="text-[var(--text-primary)]"
@@ -94,7 +95,7 @@ const Sidebar: React.FC = () => {
       </div>
 
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex flex-col justify-between w-64 bg-[var(--color-white)] border-r border-[var(--border-color)] min-h-screen fixed left-0 top-0">
+      <aside className="hidden lg:flex flex-col justify-between w-64 bg-[var(--bg-card)] border-r border-[var(--border-color)] min-h-screen fixed left-0 top-0">
         <SidebarContent />
       </aside>
 
@@ -108,7 +109,7 @@ const Sidebar: React.FC = () => {
               exit={{ x: -300 }}
               transition={{ type: "spring", stiffness: 80, damping: 20 }}
               ref={sidebarRef}
-              className="fixed inset-y-0 left-0 z-50 bg-[var(--color-white)] w-64 shadow-lg flex flex-col justify-between"
+              className="fixed inset-y-0 left-0 z-50 bg-[var(--bg-card)] w-64 shadow-lg flex flex-col justify-between"
             >
               <SidebarContent />
             </motion.div>
@@ -118,7 +119,7 @@ const Sidebar: React.FC = () => {
               animate={{ opacity: 0.4 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="fixed inset-0 bg-black z-40"
+              className="fixed inset-0 bg-[var(--shadow-color)] z-40"
               onClick={() => setIsOpen(false)}
             />
           </>

@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import { motion } from "framer-motion"
 import { Users, Wallet, TrendingUp, Calendar, Award, IndianRupee } from "lucide-react"
@@ -12,49 +12,43 @@ const statsCards = [
     title: "Total Chit Groups",
     value: "24",
     icon: Users,
-    color: "from-blue-500 to-blue-600",
-    bgColor: "bg-blue-50",
-    textColor: "text-blue-600",
+    bgColor: "bg-[var(--bg-highlight)]",
+    textColor: "text-[var(--color-primary)]",
   },
   {
     title: "Total Customers",
     value: "486",
     icon: Wallet,
-    color: "from-green-500 to-green-600",
-    bgColor: "bg-green-50",
-    textColor: "text-green-600",
+    bgColor: "bg-[var(--bg-highlight)]",
+    textColor: "text-[var(--color-secondary)]",
   },
   {
     title: "Pending Collections",
     value: "₹2,45,000",
     icon: TrendingUp,
-    color: "from-orange-500 to-orange-600",
-    bgColor: "bg-orange-50",
-    textColor: "text-orange-600",
+    bgColor: "bg-[var(--bg-highlight)]",
+    textColor: "text-[var(--color-accent)]",
   },
   {
     title: "Upcoming Auctions",
     value: "8",
     icon: Calendar,
-    color: "from-purple-500 to-purple-600",
-    bgColor: "bg-purple-50",
-    textColor: "text-purple-600",
+    bgColor: "bg-[var(--bg-highlight)]",
+    textColor: "text-[var(--color-primary)]",
   },
   {
     title: "Active Bids",
     value: "12",
     icon: Award,
-    color: "from-pink-500 to-pink-600",
-    bgColor: "bg-pink-50",
-    textColor: "text-pink-600",
+    bgColor: "bg-[var(--bg-highlight)]",
+    textColor: "text-[var(--color-secondary)]",
   },
   {
     title: "Total Revenue",
     value: "₹2,25,00,000",
     icon: TrendingUp,
-    color: "from-indigo-500 to-indigo-600",
-    bgColor: "bg-indigo-50",
-    textColor: "text-indigo-600",
+    bgColor: "bg-[var(--bg-highlight)]",
+    textColor: "text-[var(--color-accent)]",
   },
 ]
 
@@ -92,7 +86,7 @@ const biddingSummaryData = [
 
 export default function DashboardPage() {
   return (
-      <div className="space-y-6 max-w-7xl mx-auto ">
+      <div className="space-y-6 max-w-7xl mx-auto">
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {statsCards.map((stat, index) => (
@@ -106,8 +100,8 @@ export default function DashboardPage() {
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground mb-1">{stat.title}</p>
-                      <h3 className="text-3xl font-bold text-foreground">{stat.value}</h3>
+                      <p className="text-sm text-[var(--text-secondary)] mb-1">{stat.title}</p>
+                      <h3 className="text-3xl font-bold text-[var(--text-primary)]">{stat.value}</h3>
                     </div>
                     <div className={`${stat.bgColor} p-4 rounded-2xl`}>
                       <stat.icon className={`w-8 h-8 ${stat.textColor}`} />
@@ -128,19 +122,19 @@ export default function DashboardPage() {
           >
             <Card className="border-0 shadow-lg">
               <CardHeader>
-                <CardTitle className="text-xl">Monthly Collection Trend</CardTitle>
+                <CardTitle className="text-xl text-[var(--text-primary)]">Monthly Collection Trend</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={monthlyCollectionData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                      <XAxis dataKey="month" stroke="#888" fontSize={12} />
-                      <YAxis stroke="#888" fontSize={12} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                      <XAxis dataKey="month" stroke="var(--text-secondary)" fontSize={12} />
+                      <YAxis stroke="var(--text-secondary)" fontSize={12} />
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: "white",
-                          border: "1px solid #e5e7eb",
+                          backgroundColor: "var(--bg-card)",
+                          border: `1px solid var(--border-color)`,
                           borderRadius: "8px",
                         }}
                         formatter={(value: number) => `₹${value.toLocaleString()}`}
@@ -148,9 +142,9 @@ export default function DashboardPage() {
                       <Line
                         type="monotone"
                         dataKey="amount"
-                        stroke="#3b82f6"
+                        stroke="var(--color-primary)"
                         strokeWidth={3}
-                        dot={{ fill: "#3b82f6", r: 4 }}
+                        dot={{ fill: "var(--color-primary)", r: 4 }}
                         activeDot={{ r: 6 }}
                       />
                     </LineChart>
@@ -167,24 +161,24 @@ export default function DashboardPage() {
           >
             <Card className="border-0 shadow-lg">
               <CardHeader>
-                <CardTitle className="text-xl">Bidding Summary</CardTitle>
+                <CardTitle className="text-xl text-[var(--text-primary)]">Bidding Summary</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={biddingSummaryData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                      <XAxis dataKey="group" stroke="#888" fontSize={12} />
-                      <YAxis stroke="#888" fontSize={12} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                      <XAxis dataKey="group" stroke="var(--text-secondary)" fontSize={12} />
+                      <YAxis stroke="var(--text-secondary)" fontSize={12} />
                       <Tooltip
                         contentStyle={{
-                          backgroundColor: "white",
-                          border: "1px solid #e5e7eb",
+                          backgroundColor: "var(--bg-card)",
+                          border: `1px solid var(--border-color)`,
                           borderRadius: "8px",
                         }}
                         formatter={(value: number) => `₹${value.toLocaleString()}`}
                       />
-                      <Bar dataKey="amount" fill="#10b981" radius={[8, 8, 0, 0]} />
+                      <Bar dataKey="amount" fill="var(--color-secondary)" radius={[8, 8, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -201,8 +195,8 @@ export default function DashboardPage() {
         >
           <Card className="border-0 shadow-lg">
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-xl">Recent Activity</CardTitle>
-              <Button variant="outline" size="sm" className="rounded-xl bg-transparent">
+              <CardTitle className="text-xl text-[var(--text-primary)]">Recent Activity</CardTitle>
+              <Button variant="outline" size="sm" className="rounded-xl bg-transparent text-[var(--color-primary)] border-[var(--border-color)]">
                 View All
               </Button>
             </CardHeader>
@@ -210,12 +204,12 @@ export default function DashboardPage() {
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
-                    <tr className="border-b">
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-muted-foreground">Member</th>
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-muted-foreground">Group</th>
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-muted-foreground">Action</th>
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-muted-foreground">Amount</th>
-                      <th className="text-left py-3 px-4 text-sm font-semibold text-muted-foreground">Date</th>
+                    <tr className="border-b border-[var(--border-color)]">
+                      <th className="text-left py-3 px-4 text-sm font-semibold text-[var(--text-secondary)]">Member</th>
+                      <th className="text-left py-3 px-4 text-sm font-semibold text-[var(--text-secondary)]">Group</th>
+                      <th className="text-left py-3 px-4 text-sm font-semibold text-[var(--text-secondary)]">Action</th>
+                      <th className="text-left py-3 px-4 text-sm font-semibold text-[var(--text-secondary)]">Amount</th>
+                      <th className="text-left py-3 px-4 text-sm font-semibold text-[var(--text-secondary)]">Date</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -225,23 +219,23 @@ export default function DashboardPage() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: 0.9 + activity.id * 0.05 }}
-                        className="border-b hover:bg-muted/50 transition-colors"
+                        className="border-b border-[var(--border-color)] hover:bg-[var(--bg-highlight)] transition-colors"
                       >
-                        <td className="py-3 px-4 text-sm font-medium">{activity.member}</td>
-                        <td className="py-3 px-4 text-sm">{activity.group}</td>
+                        <td className="py-3 px-4 text-sm font-medium text-[var(--text-primary)]">{activity.member}</td>
+                        <td className="py-3 px-4 text-sm text-[var(--text-primary)]">{activity.group}</td>
                         <td className="py-3 px-4 text-sm">
                           <span
                             className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                               activity.action === "Won Bid"
-                                ? "bg-green-100 text-green-800"
-                                : "bg-blue-100 text-blue-800"
+                                ? "bg-[var(--btn-secondary-bg)] text-[var(--text-light)]"
+                                : "bg-[var(--btn-accent-bg)] text-[var(--text-light)]"
                             }`}
                           >
                             {activity.action}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-sm font-semibold">{activity.amount}</td>
-                        <td className="py-3 px-4 text-sm text-muted-foreground">{activity.date}</td>
+                        <td className="py-3 px-4 text-sm font-semibold text-[var(--text-primary)]">{activity.amount}</td>
+                        <td className="py-3 px-4 text-sm text-[var(--text-secondary)]">{activity.date}</td>
                       </motion.tr>
                     ))}
                   </tbody>
@@ -257,41 +251,41 @@ export default function DashboardPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 1.2, duration: 0.5 }}
         >
-          <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-50 to-green-50">
+          <Card className="border-0 shadow-lg bg-[var(--bg-highlight)]">
             <CardHeader>
-              <CardTitle className="text-xl">Quick Actions</CardTitle>
+              <CardTitle className="text-xl text-[var(--text-primary)]">Quick Actions</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Link href="/groups">
-                  <Button variant="ghost" className="w-full h-20 bg-white hover:bg-gray-50 text-gray-800 rounded-2xl shadow-md hover:shadow-lg transition-all">
+                  <Button variant="ghost" className="w-full h-20 bg-[var(--color-white)] hover:bg-[var(--bg-main)] text-[var(--text-primary)] rounded-2xl shadow-md hover:shadow-lg transition-all">
                     <div className="flex flex-col items-center gap-2">
-                      <Users className="w-6 h-6" />
-                      <span className="text-sm font-semibold">Manage Groups</span>
+                      <Users className="w-6 h-6 text-[var(--color-primary)]" />
+                      <span className="text-sm font-semibold text-[var(--text-primary)]">Manage Groups</span>
                     </div>
                   </Button>
                 </Link>
                 <Link href="/subscribers">
-                  <Button variant="ghost" className="w-full h-20 bg-white hover:bg-gray-50 text-gray-800 rounded-2xl shadow-md hover:shadow-lg transition-all">
+                  <Button variant="ghost" className="w-full h-20 bg-[var(--color-white)] hover:bg-[var(--bg-main)] text-[var(--text-primary)] rounded-2xl shadow-md hover:shadow-lg transition-all">
                     <div className="flex flex-col items-center gap-2">
-                      <Wallet className="w-6 h-6" />
-                      <span className="text-sm font-semibold">Customers</span>
+                      <Wallet className="w-6 h-6 text-[var(--color-secondary)]" />
+                      <span className="text-sm font-semibold text-[var(--text-primary)]">Customers</span>
                     </div>
                   </Button>
                 </Link>
                 <Link href="/collections">
-                  <Button variant="ghost" className="w-full h-20 bg-white hover:bg-gray-50 text-gray-800 rounded-2xl shadow-md hover:shadow-lg transition-all">
+                  <Button variant="ghost" className="w-full h-20 bg-[var(--color-white)] hover:bg-[var(--bg-main)] text-[var(--text-primary)] rounded-2xl shadow-md hover:shadow-lg transition-all">
                     <div className="flex flex-col items-center gap-2">
-                      <IndianRupee className="w-6 h-6" />
-                      <span className="text-sm font-semibold">Collections</span>
+                      <IndianRupee className="w-6 h-6 text-[var(--color-accent)]" />
+                      <span className="text-sm font-semibold text-[var(--text-primary)]">Collections</span>
                     </div>
                   </Button>
                 </Link>
                 <Link href="/bidding">
-                  <Button variant="ghost" className="w-full h-20 bg-white hover:bg-gray-50 text-gray-800 rounded-2xl shadow-md hover:shadow-lg transition-all">
+                  <Button variant="ghost" className="w-full h-20 bg-[var(--color-white)] hover:bg-[var(--bg-main)] text-[var(--text-primary)] rounded-2xl shadow-md hover:shadow-lg transition-all">
                     <div className="flex flex-col items-center gap-2">
-                      <Award className="w-6 h-6" />
-                      <span className="text-sm font-semibold">Bidding</span>
+                      <Award className="w-6 h-6 text-[var(--color-accent)]" />
+                      <span className="text-sm font-semibold text-[var(--text-primary)]">Bidding</span>
                     </div>
                   </Button>
                 </Link>

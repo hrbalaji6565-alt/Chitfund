@@ -10,7 +10,7 @@ import { CardContent, CardHeader, CardTitle } from "@/app/components/ui/card"
 import { Badge } from "@/app/components/ui/badge"
 
 interface FormField {
-  name: keyof ChitGroup  // field must be a key from ChitGroup
+  name: keyof ChitGroup
   label: string
   type: "text" | "number" | "date"
   placeholder?: string
@@ -64,7 +64,7 @@ export default function GroupsPage() {
     endDate: "",
     status: "Active",
     remarks: "",
-    penaltyPercent: 2, // default penalty
+    penaltyPercent: 2,
   })
 
   const filteredGroups = groups.filter((g) => g.name.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -81,75 +81,58 @@ export default function GroupsPage() {
     resetForm()
   }
 
-const handleEditGroup = () => {
-  if (editingGroup) {
-    setGroups(groups.map((g) => (g.id === editingGroup.id ? { ...editingGroup, ...formData } : g)))
-    setEditingGroup(null) 
-    setIsAddDialogOpen(false)
-    resetForm()          
-  }
-}
-
-
-  const handleDeleteGroup = (id: number) => {
-    setGroups(groups.filter((g) => g.id !== id))
+  const handleEditGroup = () => {
+    if (editingGroup) {
+      setGroups(groups.map((g) => (g.id === editingGroup.id ? { ...editingGroup, ...formData } : g)))
+      setEditingGroup(null)
+      setIsAddDialogOpen(false)
+      resetForm()
+    }
   }
 
-  const resetForm = () => {
-    setFormData({ name: "", chitValue: 0, monthlyInstallment: 0, totalMonths: 20, totalMembers: 20, startDate: "", endDate: "", status: "Active", remarks: "", penaltyPercent: 2 })
-  }
+  const handleDeleteGroup = (id: number) => setGroups(groups.filter((g) => g.id !== id))
+  const resetForm = () => setFormData({ name: "", chitValue: 0, monthlyInstallment: 0, totalMonths: 20, totalMembers: 20, startDate: "", endDate: "", status: "Active", remarks: "", penaltyPercent: 2 })
+  const openEditDialog = (group: ChitGroup) => { setEditingGroup(group); setFormData(group) }
 
-  const openEditDialog = (group: ChitGroup) => {
-    setEditingGroup(group)
-    setFormData(group)
-  }
+  const renderFormFields = () =>
+    formFields.map((field) => (
+      <div key={field.name} className="space-y-2">
+        <Label htmlFor={field.name} className="text-[var(--text-primary)]">{field.label}</Label>
+        <Input
+          id={field.name}
+          type={field.type}
+          value={formData[field.name] as string | number}
+          onChange={(e) => setFormData({ ...formData, [field.name]: field.type === "number" ? Number(e.target.value) : e.target.value })}
+          placeholder={field.placeholder}
+          className="bg-[var(--bg-card)] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)] border-[var(--border-color)]"
+        />
+      </div>
+    ))
 
- const renderFormFields = () =>
-  formFields.map((field) => (
-    <div key={field.name} className="space-y-2">
-      <Label htmlFor={field.name}>{field.label}</Label>
-      <Input
-        id={field.name}
-        type={field.type}
-        value={formData[field.name] as string | number} // cast based on field type
-        onChange={(e) => {
-          const value = field.type === "number" ? Number(e.target.value) : e.target.value
-          setFormData({ ...formData, [field.name]: value })
-        }}
-        placeholder={field.placeholder}
-      />
-    </div>
-  ))
-// update
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-          <Input placeholder="Search groups..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10 h-12 rounded-xl" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--text-secondary)]" />
+          <Input placeholder="Search groups..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10 h-12 rounded-xl bg-[var(--bg-card)] text-[var(--text-primary)]" />
         </div>
 
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="bg-gradient-to-r from-blue-500 to-green-500 hover:from-blue-600 hover:to-green-600 text-white rounded-xl shadow-lg h-12 px-6">
-              <Plus className="w-5 h-5 mr-2" />
-              Add New Group
+            <Button variant="default">
+              <Plus className="w-5 h-5 mr-2" /> Add New Group
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-[var(--bg-card)] text-[var(--text-primary)]">
             <DialogHeader>
               <DialogTitle>Add New Chit Group</DialogTitle>
               <DialogDescription>Create a new chit group with all the necessary details.</DialogDescription>
             </DialogHeader>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">{renderFormFields()}</div>
             <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleAddGroup} className="bg-gradient-to-r from-blue-500 to-green-500 hover:from-blue-600 hover:to-green-600 text-white">
-                Create Group
-              </Button>
+              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
+              <Button onClick={handleAddGroup} className="bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-secondary)] text-[var(--text-light)]">Create Group</Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -158,15 +141,17 @@ const handleEditGroup = () => {
       {/* Groups Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredGroups.map((group) => (
-          <div key={group.id} className="border-0 shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden p-4">
-            <CardHeader className="bg-gradient-to-br from-blue-50 to-green-50 pb-4">
+          <div key={group.id} className="border-0 shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden p-4 bg-[var(--bg-card)] text-[var(--text-primary)]">
+            <CardHeader className="bg-gradient-to-br from-[var(--bg-highlight)] to-[var(--bg-highlight)] pb-4">
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <CardTitle className="text-lg mb-2">{group.name}</CardTitle>
                   <Badge
-                    variant={group.status === "Active" ? "default" : "secondary"}
+                    variant="default"
                     className={
-                      group.status === "Active" ? "bg-green-100 text-green-700 hover:bg-green-200" : "bg-gray-100 text-gray-700"
+                      group.status === "Active"
+                        ? "bg-[var(--color-secondary)] text-[var(--text-light)] hover:bg-[var(--color-secondary-dark)]"
+                        : "bg-[var(--bg-muted)] text-[var(--text-secondary)]"
                     }
                   >
                     {group.status === "Active" ? <CheckCircle className="w-3 h-3 mr-1" /> : <XCircle className="w-3 h-3 mr-1" />}
@@ -176,28 +161,24 @@ const handleEditGroup = () => {
                 <div className="flex gap-2">
                   <Dialog>
                     <DialogTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-blue-100" onClick={() => openEditDialog(group)}>
-                        <Edit className="w-4 h-4 text-blue-600" />
+                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-[var(--bg-highlight)]" onClick={() => openEditDialog(group)}>
+                        <Edit className="w-4 h-4 text-[var(--color-primary)]" />
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                    <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto bg-[var(--bg-card)] text-[var(--text-primary)]">
                       <DialogHeader>
                         <DialogTitle>Edit Chit Group</DialogTitle>
                         <DialogDescription>Update the group details below.</DialogDescription>
                       </DialogHeader>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">{renderFormFields()}</div>
                       <div className="flex justify-end gap-3">
-                        <Button variant="outline" onClick={() => setEditingGroup(null)}>
-                          Cancel
-                        </Button>
-                        <Button onClick={handleEditGroup} className="bg-gradient-to-r from-blue-500 to-green-500 hover:from-blue-600 hover:to-green-600 text-white">
-                          Update Group
-                        </Button>
+                        <Button variant="outline" onClick={() => setEditingGroup(null)}>Cancel</Button>
+                        <Button onClick={handleEditGroup} className="bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-secondary)] text-[var(--text-light)]">Update Group</Button>
                       </div>
                     </DialogContent>
                   </Dialog>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-red-100" onClick={() => handleDeleteGroup(group.id)}>
-                    <Trash2 className="w-4 h-4 text-red-600" />
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-[var(--bg-highlight)]" onClick={() => handleDeleteGroup(group.id)}>
+                    <Trash2 className="w-4 h-4 text-[var(--color-accent)]" />
                   </Button>
                 </div>
               </div>
@@ -205,29 +186,27 @@ const handleEditGroup = () => {
 
             <CardContent className="pt-4 space-y-2">
               <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">Chit Value</span>
+                <span className="text-sm text-[var(--text-secondary)]">Chit Value</span>
                 <span className="font-semibold text-lg">₹{group.chitValue.toLocaleString()}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">Monthly Installment</span>
+                <span className="text-sm text-[var(--text-secondary)]">Monthly Installment</span>
                 <span className="font-semibold">₹{group.monthlyInstallment.toLocaleString()}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">Penalty</span>
+                <span className="text-sm text-[var(--text-secondary)]">Penalty</span>
                 <span className="font-semibold">{group.penaltyPercent || 0}%</span>
               </div>
 
               <div className="flex items-center gap-2 text-sm">
-                <Users className="w-4 h-4 text-blue-600" />
-                <span className="text-muted-foreground">{group.totalMembers} Members</span>
+                <Users className="w-4 h-4 text-[var(--color-primary)]" />
+                <span className="text-[var(--text-secondary)]">{group.totalMembers} Members</span>
               </div>
               <div className="flex items-center gap-2 text-sm">
-                <Calendar className="w-4 h-4 text-green-600" />
-                <span className="text-muted-foreground">
-                  {group.totalMonths} Months ({group.startDate} to {group.endDate})
-                </span>
+                <Calendar className="w-4 h-4 text-[var(--color-secondary)]" />
+                <span className="text-[var(--text-secondary)]">{group.totalMonths} Months ({group.startDate} to {group.endDate})</span>
               </div>
-              {group.remarks && <p className="text-xs text-muted-foreground pt-2 border-t">{group.remarks}</p>}
+              {group.remarks && <p className="text-xs text-[var(--text-secondary)] pt-2 border-t border-[var(--border-color)]">{group.remarks}</p>}
             </CardContent>
           </div>
         ))}
