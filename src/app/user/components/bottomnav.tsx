@@ -11,7 +11,7 @@ export default function BottomNav() {
     { href: "/user", label: "Dashboard", icon: <LayoutDashboard size={20} /> },
     { href: "/user/chit-funds", label: "Chit Funds", icon: <Funnel size={20} /> },
     { href: "/user/profile", label: "Profile", icon: <Users size={20} /> },
-    { href: "/user/active-funds", label: "Active", icon: <Wallet size={20} /> },
+    { href: "/user/active-funds", label: "Active Funds", icon: <Wallet size={20} /> },
     { href: "/user/transactions", label: "Txns", icon: <FileText size={20} /> },
   ];
 

@@ -12,8 +12,10 @@ import {
   DropdownMenuTrigger,
 } from "@/app/components/ui/dropdownMenu";
 import { Avatar, AvatarFallback } from "@/app/components/ui/avtar";
+import { useRouter } from "next/navigation";
 
 export default function Topbar() {
+  const router = useRouter();
   return (
     <header className="w-full sticky top-0 z-50 bg-[var(--bg-main)] border-b border-[var(--border-color)] shadow-sm">
       <div className="flex flex-wrap items-center justify-between px-6 py-3">
@@ -76,7 +78,7 @@ export default function Topbar() {
           <DropdownMenuItem
             className="hover:bg-[var(--bg-highlight)]"
             onClick={() => {
-              /* Add logout logic here */
+              router.push('/');
             }}
           >
             <LogOut className="mr-2 h-4 w-4 text-[var(--text-secondary)]" />
