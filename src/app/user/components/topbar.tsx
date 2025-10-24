@@ -66,7 +66,7 @@ export default function Topbar() {
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator className="bg-[var(--border-color)]" />
-          <DropdownMenuItem className="hover:bg-[var(--bg-highlight)]">
+          <DropdownMenuItem onClick={() => router.push('/user/profile')} className="hover:bg-[var(--bg-highlight)]">
             <User className="mr-2 h-4 w-4 text-[var(--text-secondary)]" />
             <span>Profile</span>
           </DropdownMenuItem>
