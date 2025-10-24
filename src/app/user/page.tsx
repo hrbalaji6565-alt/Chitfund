@@ -76,41 +76,41 @@ export default function UserPage() {
                 </Button>
             </div>
 
-      {/* Overview Cards */}
-<div
-  className="grid gap-2 sm:gap-4"
-  style={{
-    gridTemplateColumns:
-      "repeat(auto-fit, minmax(140px, 1fr))",
-  }}
->
-  {metrics.map((item, idx) => (
-    <Card
-      key={idx}
-      className="border-0 shadow-sm transition-transform hover:scale-[1.02]"
-      style={{
-        background: item.bg,
-        color: "var(--text-light)",
-        minHeight: "95px",
-        width: "100%",
-      }}
-    >
-      <CardContent className="flex flex-col justify-between p-3 sm:p-4">
-        <div className="flex justify-between items-center">
-          <p className="text-[11px] sm:text-sm opacity-90">
-            {item.title}
-          </p>
-          <div className="bg-white/25 p-2 rounded-xl shrink-0">
-            {item.icon}
-          </div>
-        </div>
-        <h3 className="text-lg sm:text-2xl font-bold mt-1">
-          {item.value}
-        </h3>
-      </CardContent>
-    </Card>
-  ))}
-</div>
+            {/* Overview Cards */}
+            <div
+                className="grid gap-2 sm:gap-4"
+                style={{
+                    gridTemplateColumns:
+                        "repeat(auto-fit, minmax(140px, 1fr))",
+                }}
+            >
+                {metrics.map((item, idx) => (
+                    <Card
+                        key={idx}
+                        className="border-0 shadow-sm transition-transform hover:scale-[1.02]"
+                        style={{
+                            background: item.bg,
+                            color: "var(--text-light)",
+                            minHeight: "95px",
+                            width: "100%",
+                        }}
+                    >
+                        <CardContent className="flex flex-col justify-between p-3 sm:p-4">
+                            <div className="flex justify-between items-center">
+                                <p className="text-[11px] sm:text-sm opacity-90">
+                                    {item.title}
+                                </p>
+                                <div className="bg-white/25 p-2 rounded-xl shrink-0">
+                                    {item.icon}
+                                </div>
+                            </div>
+                            <h3 className="text-lg sm:text-2xl font-bold mt-1">
+                                {item.value}
+                            </h3>
+                        </CardContent>
+                    </Card>
+                ))}
+            </div>
 
 
 
@@ -118,9 +118,7 @@ export default function UserPage() {
             <Card
                 className="shadow-lg border-0"
                 style={{
-                    maxHeight: "400px",
-                    display: "flex",
-                    flexDirection: "column",
+                    width: "100%",
                 }}
             >
                 <CardHeader
@@ -135,9 +133,8 @@ export default function UserPage() {
                 </CardHeader>
 
                 <CardContent
-                    className="p-0 overflow-auto"
+                    className="p-0 overflow-x-auto"
                     style={{
-                        flex: "1",
                         scrollbarWidth: "thin",
                     }}
                 >
@@ -152,28 +149,16 @@ export default function UserPage() {
                                     color: "var(--text-secondary)",
                                 }}
                             >
-                                <th
-                                    className="p-3 text-left font-medium"
-                                    style={{ width: "35%" }}
-                                >
+                                <th className="p-3 text-left font-medium" style={{ width: "80px" }}>
                                     Name
                                 </th>
-                                <th
-                                    className="p-3 text-left font-medium"
-                                    style={{ width: "25%" }}
-                                >
+                                <th className="p-3 text-left font-medium" style={{ width: "120px" }}>
                                     Date
                                 </th>
-                                <th
-                                    className="p-3 text-left font-medium"
-                                    style={{ width: "20%" }}
-                                >
+                                <th className="p-3 text-left font-medium" style={{ width: "80px" }}>
                                     Status
                                 </th>
-                                <th
-                                    className="p-3 text-right font-medium"
-                                    style={{ width: "20%" }}
-                                >
+                                <th className="p-3 text-right font-medium" style={{ width: "80px" }}>
                                     Amount
                                 </th>
                             </tr>
@@ -230,6 +215,7 @@ export default function UserPage() {
                     </table>
                 </CardContent>
             </Card>
+
         </div>
     );
 }
