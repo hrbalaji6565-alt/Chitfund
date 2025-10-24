@@ -113,123 +113,123 @@ export default function UserPage() {
             </div>
 
 
-{/* Recent Transactions */}
-<Card
-  className="shadow-lg border-0"
-  style={{
-    width: "100%",
-  }}
->
-  <CardHeader
-    style={{
-      background: "var(--bg-highlight)",
-      borderBottom: "1px solid var(--border-color)",
-    }}
-  >
-    <CardTitle className="py-2" style={{ color: "var(--color-secondary)" }}>
-      Recent Transactions
-    </CardTitle>
-  </CardHeader>
-
-  <CardContent
-    className="p-0 overflow-x-auto"
-    style={{
-      scrollbarWidth: "thin",
-      maxHeight: "auto",
-    }}
-  >
-    <table
-      className="min-w-full border-collapse text-sm sm:text-base"
-      style={{
-        width: "100%",
-        tableLayout: "auto",
-      }}
-    >
-      <thead>
-        <tr
-          style={{
-            background: "var(--bg-highlight)",
-            color: "var(--text-secondary)",
-          }}
-        >
-          <th
-            className="p-3 text-left font-medium"
-            style={{ minWidth: "150px" }}
-          >
-            Name
-          </th>
-          <th
-            className="p-3 text-left font-medium"
-            style={{ minWidth: "120px" }}
-          >
-            Date
-          </th>
-          <th
-            className="p-3 text-left font-medium"
-            style={{ minWidth: "80px" }}
-          >
-            Status
-          </th>
-          <th
-            className="p-3 text-right font-medium"
-            style={{ minWidth: "100px" }}
-          >
-            Amount
-          </th>
-        </tr>
-      </thead>
-
-      <tbody>
-        {transactions.map((tx) => (
-          <tr
-            key={tx.id}
-            className="hover:bg-[var(--bg-highlight)] transition"
-            style={{
-              borderBottom: "1px solid var(--border-color)",
-            }}
-          >
-            <td className="p-3" style={{ color: "var(--text-primary)" }}>
-              {tx.name}
-            </td>
-            <td className="p-3" style={{ color: "var(--text-secondary)" }}>
-              {tx.date}
-            </td>
-            <td className="p-3">
-              <Badge
-                className="rounded-full px-2 py-1 text-xs sm:text-sm"
+            {/* Recent Transactions */}
+            <Card
+                className="shadow-lg border-0"
                 style={{
-                  background:
-                    tx.type === "credit"
-                      ? "var(--btn-secondary-bg)"
-                      : "var(--btn-primary-bg)",
-                  color: "var(--text-light)",
+                    width: "100%",
                 }}
-              >
-                {tx.type === "credit" ? (
-                  <ArrowUpRight className="w-3 h-3 inline mr-1" />
-                ) : (
-                  <ArrowDownRight className="w-3 h-3 inline mr-1" />
-                )}
-                {tx.type === "credit" ? "Credit" : "Debit"}
-              </Badge>
-            </td>
-            <td
-              className="p-3 text-right font-semibold"
-              style={{
-                color:
-                  tx.type === "credit"
-                    ? "var(--color-secondary)"
-                    : "var(--color-primary)",
-              }}
             >
-              {tx.amount}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  </CardContent>
-</Card>
+                <CardHeader
+                    style={{
+                        background: "var(--bg-highlight)",
+                        borderBottom: "1px solid var(--border-color)",
+                    }}
+                >
+                    <CardTitle className="py-2" style={{ color: "var(--color-secondary)" }}>
+                        Recent Transactions
+                    </CardTitle>
+                </CardHeader>
+
+                <CardContent
+                    className="p-0 overflow-x-auto"
+                    style={{
+                        scrollbarWidth: "thin",
+                        maxHeight: "auto",
+                    }}
+                >
+                    <table
+                        className="min-w-full border-collapse text-sm sm:text-base"
+                        style={{
+                            width: "100%",
+                            tableLayout: "auto",
+                        }}
+                    >
+                        <thead>
+                            <tr
+                                style={{
+                                    background: "var(--bg-highlight)",
+                                    color: "var(--text-secondary)",
+                                }}
+                            >
+                                <th
+                                    className="p-3 text-left font-medium"
+                                    style={{ minWidth: "150px" }}
+                                >
+                                    Name
+                                </th>
+                                <th
+                                    className="p-3 text-left font-medium"
+                                    style={{ minWidth: "120px" }}
+                                >
+                                    Date
+                                </th>
+                                <th
+                                    className="p-3 text-left font-medium"
+                                    style={{ minWidth: "80px" }}
+                                >
+                                    Status
+                                </th>
+                                <th
+                                    className="p-3 text-right font-medium"
+                                    style={{ minWidth: "100px" }}
+                                >
+                                    Amount
+                                </th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+                            {transactions.map((tx) => (
+                                <tr
+                                    key={tx.id}
+                                    className="hover:bg-[var(--bg-highlight)] transition"
+                                    style={{
+                                        borderBottom: "1px solid var(--border-color)",
+                                    }}
+                                >
+                                    <td className="p-3" style={{ color: "var(--text-primary)" }}>
+                                        {tx.name}
+                                    </td>
+                                    <td className="p-3" style={{ color: "var(--text-secondary)" }}>
+                                        {tx.date}
+                                    </td>
+                                    <td className="p-3">
+                                        <Badge
+                                            className="rounded-full px-2 py-1 text-xs sm:text-sm"
+                                            style={{
+                                                background:
+                                                    tx.type === "credit"
+                                                        ? "var(--btn-secondary-bg)"
+                                                        : "var(--btn-primary-bg)",
+                                                color: "var(--text-light)",
+                                            }}
+                                        >
+                                            {tx.type === "credit" ? (
+                                                <ArrowUpRight className="w-3 h-3 inline mr-1" />
+                                            ) : (
+                                                <ArrowDownRight className="w-3 h-3 inline mr-1" />
+                                            )}
+                                            {tx.type === "credit" ? "Credit" : "Debit"}
+                                        </Badge>
+                                    </td>
+                                    <td
+                                        className="p-3 text-right font-semibold"
+                                        style={{
+                                            color:
+                                                tx.type === "credit"
+                                                    ? "var(--color-secondary)"
+                                                    : "var(--color-primary)",
+                                        }}
+                                    >
+                                        {tx.amount}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </CardContent>
+            </Card>
 
 
         </div>
