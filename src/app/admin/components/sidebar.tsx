@@ -53,7 +53,7 @@ const Sidebar: React.FC = () => {
   ];
 
   const SidebarContent = () => (
-    <nav className="py-6 px-4 flex flex-col justify-between h-full mt-12">
+    <nav className="py-6 px-4 flex flex-col justify-between h-full mt-0 md:mt-12">
       <div>
         <h2 className="text-lg font-semibold text-[var(--color-primary)] mb-6">
           Cronnis Money Maven Chits

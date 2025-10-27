@@ -35,7 +35,7 @@ const Topbar: React.FC = () => {
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" className="relative h-10 w-10 rounded-full">
                     <Avatar>
-                      <AvatarFallback className="bg-gradient-to-br from-blue-500 to-green-500 text-white">
+                      <AvatarFallback className="text-white">
                         AD
                       </AvatarFallback>
                     </Avatar>

@@ -52,7 +52,7 @@ export default function Topbar() {
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="relative h-10 w-10 rounded-full">
             <Avatar>
-              <AvatarFallback className="bg-[var(--gradient-primary)] text-[var(--text-light)]">
+              <AvatarFallback className="text-[var(--text-light)]">
                 AD
               </AvatarFallback>
             </Avatar>

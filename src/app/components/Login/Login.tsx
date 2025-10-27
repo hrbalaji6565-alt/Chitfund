@@ -132,6 +132,9 @@ export default function AuthPage() {
                  <Button className="mt-5" onClick={() => router.push('/user')}>
                 User Portal
               </Button>
+                 <Button className="mx-4 mt-5" onClick={() => router.push('/collection')}>
+                Collection Portal
+              </Button>
 
             <p className="text-center mt-6 text-gray-700">
               {isLogin ? "Don't have an account?" : "Already have an account?"}

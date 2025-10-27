@@ -36,13 +36,18 @@ export const AvatarImage: React.FC<AvatarImageProps> = ({ className = '', ...pro
   )
 }
 
-export const AvatarFallback: React.FC<AvatarFallbackProps> = ({ className = '', children, ...props }) => {
+export const AvatarFallback: React.FC<AvatarFallbackProps> = ({
+  className = "",
+  children,
+  ...props
+}) => {
   return (
     <div
-      className={`bg-gray-300 flex items-center justify-center w-full h-full rounded-full ${className}`}
+      style={{ background: "var(--gradient-primary)" }}
+      className={`flex items-center justify-center w-full h-full rounded-full transition-all duration-300 hover:[background:var(--gradient-primary-hover)] ${className}`}
       {...props}
     >
       {children}
     </div>
-  )
-}
+  );
+};
