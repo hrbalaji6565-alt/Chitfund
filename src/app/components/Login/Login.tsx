@@ -32,6 +32,7 @@ export default function AuthPage() {
       console.log("✅ Redirecting to /admin...");
       router.push("/admin");
     }
+    localStorage.setItem("adminToken", token || "");
   }, [token, router]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {

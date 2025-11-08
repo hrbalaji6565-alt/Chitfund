@@ -1,9 +1,12 @@
 import { configureStore } from "@reduxjs/toolkit";
 import adminReducer from "./adminSlice";
-
+import chitGroupReducer from "./chitGroupSlice";
+import memberReducer from "./memberSlice";
 export const store = configureStore({
   reducer: {
     admin: adminReducer,
+    chitGroups: chitGroupReducer,
+    members: memberReducer,
   },
 });
 

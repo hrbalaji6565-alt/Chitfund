@@ -23,6 +23,7 @@ const Topbar: React.FC = () => {
 
   const handleLogout = () => {
   dispatch(logout());
+  localStorage.removeItem("adminToken");
   toast.success("Logged out successfully!");
   router.push("/");
 };

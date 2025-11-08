@@ -1,9 +1,8 @@
-// middleware.ts
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export function middleware(req: NextRequest) {
-  const adminToken = req.cookies.get("adminToken")?.value;
+  const adminToken = req.cookies.get("adminToken")?.value || localStorage.getItem("adminToken") || "";
   const url = req.nextUrl.pathname;
 
   // 🛡 Protect admin routes
@@ -23,3 +22,4 @@ export function middleware(req: NextRequest) {
 export const config = {
   matcher: ["/admin/:path*"],
 };
+    
