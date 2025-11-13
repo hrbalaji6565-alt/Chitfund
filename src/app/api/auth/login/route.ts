@@ -31,6 +31,7 @@ export async function POST(req: Request) {
         name: member.name,
         email: member.email,
         role: member.role,
+        token,
         avatarUrl: member.avatarUrl,
       },
     });

@@ -1,25 +1,35 @@
+// src/middleware.ts
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 export function middleware(req: NextRequest) {
-  const adminToken = req.cookies.get("adminToken")?.value || localStorage.getItem("adminToken") || "";
-  const url = req.nextUrl.pathname;
+  const url = req.nextUrl.clone();
+  const pathname = req.nextUrl.pathname;
 
-  // 🛡 Protect admin routes
-  if (url.startsWith("/admin")) {
+  // IMPORTANT: read only cookies here (edge runtime)
+  const adminToken = req.cookies.get("adminToken")?.value || "";
+  const memberToken = req.cookies.get("memberToken")?.value || localStorage.getItem("memberToken") || "";
+
+  // Protect admin routes
+  if (pathname.startsWith("/admin")) {
     if (!adminToken) {
-      // Not logged in → redirect to login
-      const loginUrl = new URL("/", req.url);
-      return NextResponse.redirect(loginUrl);
+      url.pathname = "/";
+      return NextResponse.redirect(url);
     }
   }
 
-  // ✅ Allow access
+  // Protect user routes (exact /user and any subpath)
+  if (pathname === "/user" || pathname.startsWith("/user/")) {
+    if (!memberToken) {
+      url.pathname = "/";
+      url.searchParams.set("next", pathname);
+      return NextResponse.redirect(url);
+    }
+  }
+
   return NextResponse.next();
 }
 
-// 👇 Match all /admin routes
 export const config = {
-  matcher: ["/admin/:path*"],
+  matcher: ["/admin/:path*", "/user/:path*"],
 };
-    

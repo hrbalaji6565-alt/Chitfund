@@ -171,32 +171,31 @@ export default function SubscribersPage() {
 
   // derive UI list from server members
   const uiList: SubscriberLocal[] = members.length
-    ? members.map((m, idx) => {
-        // use a strongly-typed local record to avoid casting Member -> Record directly
-        const mRec = m as unknown as Record<string, unknown>;
-        const groupsArr = normalizeGroupsFromMember(mRec);
-        const groupNamesArr = normalizeGroupNamesFromMember(mRec);
+  ? members.map((m, idx) => {
+      const mRec = m as unknown as Record<string, unknown>;
+      const groupsArr = normalizeGroupsFromMember(mRec);
+      const groupNamesArr = normalizeGroupNamesFromMember(mRec);
 
-        return {
-          _id: (mRec._id as string) || undefined,
-          id: idx + 1,
-          name: (mRec.name as string) || "",
-          mobile: (mRec.mobile as string) || "",
-          email: (mRec.email as string) || "",
-          address: (mRec.address as string) || "",
-          joiningDate: mRec.joiningDate ? String(mRec.joiningDate).split("T")[0] : "",
-          status: ((mRec.status as "Active" | "Inactive") || "Active") as "Active" | "Inactive",
-          totalPaid: (mRec.totalPaid as number) ?? 0,
-          pendingAmount: (mRec.pendingAmount as number) ?? 0,
-          aadhaarUrl: (mRec.aadhaarUrl as string) || undefined,
-          govIdUrl: (mRec.govIdUrl as string) || undefined,
-          avatarUrl: (mRec.avatarUrl as string) || undefined,
-          attachments: (mRec.attachments as Array<{ id: string; label: string; url: string }>) || [],
-          groups: groupsArr,
-          groupId: groupsArr.length ? groupsArr[0] : (mRec.groupId as string | undefined) ?? (typeof mRec.group === "string" ? (mRec.group as string) : undefined),
-          groupName: groupNamesArr.length ? groupNamesArr[0] : (mRec.groupName as string | undefined) ?? undefined,
-        } as SubscriberLocal;
-      })
+      return {
+        _id: (mRec._id as string) || undefined,
+        id: idx + 1,
+        name: (mRec.name as string) || "",
+        mobile: (mRec.mobile as string) || "",
+        email: (mRec.email as string) || "",
+        address: (mRec.address as string) || "",
+        joiningDate: mRec.joiningDate ? String(mRec.joiningDate).split("T")[0] : "",
+        status: ((mRec.status as "Active" | "Inactive") || "Active") as "Active" | "Inactive",
+        totalPaid: (mRec.totalPaid as number) ?? 0,
+        pendingAmount: (mRec.pendingAmount as number) ?? 0,
+        aadhaarUrl: (mRec.aadhaarUrl as string) || undefined,
+        govIdUrl: (mRec.govIdUrl as string) || undefined,
+        avatarUrl: (mRec.avatarUrl as string) || undefined,
+        attachments: (mRec.attachments as Array<{ id: string; label: string; url: string }>) || [],
+        groups: groupsArr,
+        groupId: groupsArr.length ? groupsArr[0] : (mRec.groupId as string | undefined) ?? (typeof mRec.group === "string" ? (mRec.group as string) : undefined),
+        groupName: groupNamesArr.length ? groupNamesArr[0] : (mRec.groupName as string | undefined) ?? undefined,
+      } as SubscriberLocal;
+    })
     : [initialLocalSample];
 
   const filteredSubscribers = uiList.filter((s) => {
@@ -661,7 +660,7 @@ export default function SubscribersPage() {
           </DialogHeader>
 
           {viewingSubscriber ? (
-            <div className="p-6 gap-6 items-start grid md:grid-cols-12">
+            <div className="p-6 gap-6 items-start md:grid-cols-12">
               {/* LEFT: Avatar + basic info - improved alignment */}
               <div className="md:col-span-4 flex flex-col items-center md:items-start gap-4">
                 <div className="w-44 h-44 rounded-2xl overflow-hidden border border-[var(--border-color)] bg-gradient-to-br from-white/5 to-black/5 flex items-center justify-center shadow-md">
@@ -694,7 +693,7 @@ export default function SubscribersPage() {
               </div>
 
               {/* RIGHT: Images */}
-              <div className="md:col-span-8 grid grid-cols-1 gap-6">
+              <div className="md:col-span-8 grid grid-cols-1 gap-6 mt-10">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="bg-[var(--bg-muted)] rounded-xl p-4 border border-[var(--border-color)] hover:shadow-lg transition-all flex flex-col">
                     <div className="flex items-center justify-between mb-3">
