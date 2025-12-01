@@ -9,8 +9,15 @@ import { Input } from "@/app/components/ui/input";
 import { User, Check, X } from "lucide-react";
 import { fetchMembers } from "@/store/memberSlice";
 import type { RootState, AppDispatch } from "@/store/store";
+import { Badge } from "@/app/components/ui/badge";
 
 type UnknownRecord = Record<string, unknown>;
+
+type AllocationDetail = {
+  monthIndex: number;
+  principalPaid: number;
+  penaltyPaid: number;
+};
 
 type PendingPayment = {
   _id: string;
@@ -24,6 +31,7 @@ type PendingPayment = {
   fileUrl?: string | null;
   createdAt?: string;
   allocationSummary?: unknown;
+  allocationDetails?: AllocationDetail[];
   verified?: boolean;
   _source?: string;
 };
@@ -40,6 +48,61 @@ const asOptString = (v: unknown): string | undefined => {
   } catch {
     return undefined;
   }
+};
+
+const toNumber = (v: unknown): number => {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const formatDate = (iso?: string): string => {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+};
+
+const formatMonthYear = (iso?: string): string => {
+  if (!iso) return "N/A";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "N/A";
+  return new Date(t).toLocaleString("en-IN", {
+    month: "long",
+    year: "numeric",
+  });
+};
+
+/**
+ * Penalty priority:
+ * 1) Sum of allocationDetails[].penaltyPaid (if > 0)
+ * 2) Fallback: allocationSummary fields (penalty / lateFee / fine / penaltyAmount / charges)
+ */
+const getPenaltyForPayment = (p: PendingPayment): number => {
+  let fromDetails = 0;
+
+  if (p.allocationDetails && p.allocationDetails.length) {
+    fromDetails = p.allocationDetails.reduce((sum, d) => {
+      const raw = d.penaltyPaid;
+      const val = typeof raw === "number" ? raw : toNumber(raw);
+      return sum + (val || 0);
+    }, 0);
+  }
+
+  if (fromDetails > 0) return fromDetails;
+
+  if (isRecord(p.allocationSummary)) {
+    const a = p.allocationSummary as UnknownRecord;
+    const penaltyCandidate =
+      a.penalty ?? a.lateFee ?? a.fine ?? a.penaltyAmount ?? a.charges;
+
+    if (penaltyCandidate !== undefined) {
+      return toNumber(penaltyCandidate);
+    }
+  }
+
+  return 0;
 };
 
 export default function AdminTransactionsPage(): React.ReactElement {
@@ -94,6 +157,86 @@ export default function AdminTransactionsPage(): React.ReactElement {
     return { ok: res.ok, status: res.status, body };
   }
 
+  const parseAllocationArray = (input: unknown): AllocationDetail[] | undefined => {
+    if (!Array.isArray(input)) return undefined;
+    const out: AllocationDetail[] = [];
+
+    for (const item of input) {
+      if (!isRecord(item)) continue;
+
+      const rawMonth =
+        item.monthIndex ?? item.idx ?? item.month ?? item.mindex;
+      let monthIndex =
+        typeof rawMonth === "number" ? rawMonth : 1;
+      if (monthIndex >= 0 && monthIndex < 1) monthIndex += 1;
+
+      const principalPaid = toNumber(
+        item.principalPaid ??
+          item.principal ??
+          item.prc ??
+          item.pr ??
+          item.amount ??
+          item.apply ??
+          0
+      );
+
+      const penaltyPaid = toNumber(
+        item.penaltyPaid ??
+          item.penalty ??
+          item.pen ??
+          item.penaltyApplied ??
+          0
+      );
+
+      out.push({
+        monthIndex: Math.max(1, Math.round(monthIndex)),
+        principalPaid,
+        penaltyPaid,
+      });
+    }
+
+    return out.length ? out : undefined;
+  };
+
+  const parseAllocationsFromRecord = (
+    raw: UnknownRecord
+  ): AllocationDetail[] | undefined => {
+    const candidates: unknown[] = [
+      raw.allocation,
+      raw.allocated,
+      raw.allocationSummary,
+      raw.allocationDetails,
+    ];
+
+    if (isRecord(raw.rawMeta)) {
+      const rm = raw.rawMeta;
+      candidates.push(
+        rm.allocation,
+        rm.allocated,
+        rm.allocationSummary,
+        rm.allocationDetails,
+        rm.appliedAllocation
+      );
+    }
+
+    for (const c of candidates) {
+      if (typeof c === "string") {
+        try {
+          const parsed = JSON.parse(c) as unknown;
+          const arr = parseAllocationArray(parsed);
+          if (arr && arr.length) return arr;
+        } catch {
+          // ignore parse error
+        }
+      } else {
+        const arr = parseAllocationArray(c);
+        if (arr && arr.length) return arr;
+      }
+    }
+
+    return undefined;
+  };
+
   function normalizePayment(
     raw: unknown,
     fallbackGroupId?: string,
@@ -132,6 +275,7 @@ export default function AdminTransactionsPage(): React.ReactElement {
       r.allocationSummary ??
       r.allocation ??
       undefined;
+    const allocationDetails = parseAllocationsFromRecord(r);
 
     const utrValue =
       r.utr !== undefined
@@ -168,6 +312,7 @@ export default function AdminTransactionsPage(): React.ReactElement {
       fileUrl: asOptString(fileValue) ?? null,
       createdAt,
       allocationSummary,
+      allocationDetails,
       verified,
       _source: src,
     };
@@ -180,12 +325,11 @@ export default function AdminTransactionsPage(): React.ReactElement {
     try {
       log("Trying /api/admin/transactions");
       const adminResp = await fetchJson("/api/admin/transactions");
-      console.debug(adminResp);
 
       if (adminResp.ok) {
         let listUnknown: unknown[] = [];
-        if (isRecord(adminResp.body) && Array.isArray(adminResp.body.payments)) {
-          listUnknown = adminResp.body.payments as unknown[];
+        if (isRecord(adminResp.body) && Array.isArray((adminResp.body as UnknownRecord).payments)) {
+          listUnknown = (adminResp.body as UnknownRecord).payments as unknown[];
         } else if (Array.isArray(adminResp.body)) {
           listUnknown = adminResp.body as unknown[];
         }
@@ -204,20 +348,21 @@ export default function AdminTransactionsPage(): React.ReactElement {
         log(`/api/admin/transactions returned ${adminResp.status}`);
       }
 
-      // fallback -> fetch groups then payments per group
       log("Fetching /api/chitgroups for fallback");
       const gResp = await fetchJson("/api/chitgroups");
       if (!gResp.ok) {
         log(`/api/chitgroups returned ${gResp.status}`);
-        setError("No pending transactions and fallback failed. Ensure admin session is active.");
+        setError(
+          "No pending transactions and fallback failed. Ensure admin session is active."
+        );
         setLoading(false);
         return;
       }
 
       const bodyGroups = gResp.body;
       let groupsArr: unknown[] = [];
-      if (isRecord(bodyGroups) && Array.isArray(bodyGroups.groups)) {
-        groupsArr = bodyGroups.groups as unknown[];
+      if (isRecord(bodyGroups) && Array.isArray((bodyGroups as UnknownRecord).groups)) {
+        groupsArr = (bodyGroups as UnknownRecord).groups as unknown[];
       } else if (Array.isArray(bodyGroups)) {
         groupsArr = bodyGroups as unknown[];
       }
@@ -240,8 +385,8 @@ export default function AdminTransactionsPage(): React.ReactElement {
         let arr: unknown[] = [];
         if (Array.isArray(bodyPayments)) {
           arr = bodyPayments as unknown[];
-        } else if (isRecord(bodyPayments) && Array.isArray(bodyPayments.payments)) {
-          arr = bodyPayments.payments as unknown[];
+        } else if (isRecord(bodyPayments) && Array.isArray((bodyPayments as UnknownRecord).payments)) {
+          arr = (bodyPayments as UnknownRecord).payments as unknown[];
         }
 
         const fallbackName = asOptString(g.name ?? g.groupName);
@@ -301,16 +446,17 @@ export default function AdminTransactionsPage(): React.ReactElement {
       if (!res.ok) {
         let errMsg = res.statusText || "Action failed";
         if (isRecord(j)) {
+          const jRec = j as UnknownRecord;
           const errVal =
-            j.error !== undefined ? j.error : j.message !== undefined ? j.message : undefined;
+            jRec.error !== undefined ? jRec.error : jRec.message !== undefined ? jRec.message : undefined;
           if (typeof errVal === "string") errMsg = errVal;
         }
         throw new Error(errMsg);
       }
 
       let returnedRaw: unknown = undefined;
-      if (isRecord(j) && isRecord(j.payment)) {
-        returnedRaw = j.payment;
+      if (isRecord(j) && isRecord((j as UnknownRecord).payment)) {
+        returnedRaw = (j as UnknownRecord).payment;
       } else if (isRecord(j)) {
         returnedRaw = j;
       }
@@ -337,13 +483,16 @@ export default function AdminTransactionsPage(): React.ReactElement {
     p.memberId ??
     "Member";
 
+  const getDisplayGroupName = (p: PendingPayment): string =>
+    p.groupName ?? p.groupId ?? "Group";
+
   const search = filter.toLowerCase().trim();
   const filtered = useMemo(
     () =>
       payments.filter((p) => {
         if (!search) return true;
         const displayName = getDisplayMemberName(p).toLowerCase();
-        const groupName = String(p.groupName ?? p.groupId ?? "").toLowerCase();
+        const groupName = getDisplayGroupName(p).toLowerCase();
         const utr = String(p.utr ?? "").toLowerCase();
         const idstr = String(p._id ?? "").toLowerCase();
         return (
@@ -390,12 +539,15 @@ export default function AdminTransactionsPage(): React.ReactElement {
         {filtered.map((p) => {
           const itemLoading = Boolean(actionLoading[p._id]);
           const displayName = getDisplayMemberName(p);
-          const displayGroup = p.groupName ?? p.groupId ?? "Group";
-
+          const displayGroup = getDisplayGroupName(p);
           const allocText =
             typeof p.allocationSummary === "string"
               ? p.allocationSummary
               : JSON.stringify(p.allocationSummary ?? {}, null, 2);
+
+          const penaltyTotal = getPenaltyForPayment(p);
+          const installmentMonth = formatMonthYear(p.createdAt);
+          const totalWithPenalty = p.amount + penaltyTotal;
 
           return (
             <Card key={p._id}>
@@ -406,14 +558,14 @@ export default function AdminTransactionsPage(): React.ReactElement {
                       <User />
                     </div>
                     <div>
-                      <div className="font-semibold text-lg">{displayName}</div>
+                      <div className="font-semibold text-lg flex items-center gap-2">
+                        {displayName}
+                        <Badge variant="outline" className="text-[10px]">
+                          {p.verified ? "Approved" : "Pending Verification"}
+                        </Badge>
+                      </div>
                       <div className="text-xs text-gray-500">
                         {displayGroup}
-                        {p.verified ? (
-                          <span className="ml-2 text-xs text-green-600">
-                            • verified
-                          </span>
-                        ) : null}
                         {p._source ? (
                           <span className="ml-2 text-xs text-gray-400">
                             · {p._source}
@@ -437,12 +589,33 @@ export default function AdminTransactionsPage(): React.ReactElement {
                     <div>
                       <div className="text-xs text-gray-500">Received</div>
                       <div className="text-xs text-gray-500">
-                        {p.createdAt
-                          ? new Date(p.createdAt).toLocaleString()
-                          : "-"}
+                        {p.createdAt ? formatDate(p.createdAt) : "-"}
                       </div>
                     </div>
                   </div>
+
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
+                    <div>
+                      <div className="text-xs text-gray-500">Installment Month</div>
+                      <div className="font-medium">{installmentMonth}</div>
+                    </div>
+                  
+                  </div>
+
+                  {p.allocationDetails && p.allocationDetails.length > 0 && (
+                    <div className="mt-2 text-xs text-gray-600 space-y-1">
+                      <div className="font-medium">Allocation breakdown</div>
+                      {p.allocationDetails.map((ad) => (
+                        <div key={`${ad.monthIndex}_${ad.principalPaid}`}>
+                          Month {ad.monthIndex}: principal ₹
+                          {ad.principalPaid.toLocaleString()}
+                          {ad.penaltyPaid
+                            ? ` • penalty ₹${ad.penaltyPaid.toLocaleString()}`
+                            : ""}
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {p.note && (
                     <div className="mt-3 text-sm text-gray-700">
@@ -478,7 +651,7 @@ export default function AdminTransactionsPage(): React.ReactElement {
                   )}
                 </div>
 
-                <div className="flex flex-col gap-2 items-end">
+                <div className="flex flex-col gap-3 items-end">
                   <div className="text-sm text-gray-500">Payment ID</div>
                   <div className="font-mono text-xs">{p._id}</div>
 
@@ -490,9 +663,7 @@ export default function AdminTransactionsPage(): React.ReactElement {
                           className="bg-green-600 hover:bg-green-700"
                           disabled={itemLoading}
                         >
-                          {itemLoading ? (
-                            "…"
-                          ) : (
+                          {itemLoading ? "…" : (
                             <>
                               <Check /> Approve
                             </>
@@ -503,9 +674,7 @@ export default function AdminTransactionsPage(): React.ReactElement {
                           className="bg-red-600 hover:bg-red-700"
                           disabled={itemLoading}
                         >
-                          {itemLoading ? (
-                            "…"
-                          ) : (
+                          {itemLoading ? "…" : (
                             <>
                               <X /> Reject
                             </>
@@ -513,10 +682,14 @@ export default function AdminTransactionsPage(): React.ReactElement {
                         </Button>
                       </>
                     ) : (
-                      <div className="text-xs text-gray-500">
-                        No actions (verified)
+                      <div className="text-xs text-green-600 font-medium">
+                        Approved
                       </div>
                     )}
+                  </div>
+
+                  <div className="text-[11px] text-gray-400">
+                    For invoice: open <span className="font-mono">/admin/invoices</span>
                   </div>
                 </div>
               </CardContent>
