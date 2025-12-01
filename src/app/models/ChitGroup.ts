@@ -13,6 +13,7 @@ export interface IChitGroup extends Document {
   remarks: string;
   penaltyPercent: number;
   members?: mongoose.Types.ObjectId[]; // list of member ids
+   winners?: mongoose.Types.ObjectId[]; 
 }
 
 const chitGroupSchema = new Schema<IChitGroup>(
@@ -32,6 +33,8 @@ const chitGroupSchema = new Schema<IChitGroup>(
     remarks: { type: String, default: "" },
     penaltyPercent: { type: Number, default: 0 },
     members: [{ type: Schema.Types.ObjectId, ref: "Member" }], // members array
+     // NEW: winners array (members who already received disbursement)
+    winners: [{ type: Schema.Types.ObjectId, ref: "Member", default: [] }],
   },
   { timestamps: true }
 );

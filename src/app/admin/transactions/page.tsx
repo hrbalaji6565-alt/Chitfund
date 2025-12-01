@@ -1,188 +1,529 @@
+// src/app/admin/transactions/page.tsx
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
-import { Search, Calendar, User, TrendingUp, IndianRupee } from "lucide-react";
-import { motion } from "framer-motion";
+import React, { useEffect, useMemo, useState } from "react";
+import { useDispatch, useSelector } from "react-redux";
 import { Card, CardContent } from "@/app/components/ui/card";
-import { Input } from "@/app/components/ui/input";
 import Button from "@/app/components/ui/button";
+import { Input } from "@/app/components/ui/input";
+import { User, Check, X } from "lucide-react";
+import { fetchMembers } from "@/store/memberSlice";
+import type { RootState, AppDispatch } from "@/store/store";
 
-interface Transaction {
-  id: string;
-  user: string;
+type UnknownRecord = Record<string, unknown>;
+
+type PendingPayment = {
+  _id: string;
+  memberId?: string | null;
+  memberName?: string | null;
+  groupId?: string | null;
+  groupName?: string | null;
   amount: number;
-  date: string;
-  paymentType: string;
-  notes?: string;
-}
+  utr?: string | null;
+  note?: string | null;
+  fileUrl?: string | null;
+  createdAt?: string;
+  allocationSummary?: unknown;
+  verified?: boolean;
+  _source?: string;
+};
 
-// Reusable overview card
-const StatCard = ({
-  title,
-  value,
-  icon: Icon,
-}: {
-  title: string;
-  value: string | number;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
-}) => (
-  <Card className="bg-[var(--bg-card)] border border-[var(--border-color)] shadow-sm flex-1 min-w-[200px]">
-    <CardContent className="flex items-center justify-between p-5">
-      <div>
-        <p className="text-sm text-[var(--text-secondary)]">{title}</p>
-        <h2 className="text-xl font-semibold text-[var(--text-primary)]">{value}</h2>
-      </div>
-      <div className="p-3 rounded-lg bg-[var(--bg-highlight)]">
-        <Icon className="text-[var(--color-primary)]" size={22} />
-      </div>
-    </CardContent>
-  </Card>
-);
+type FetchJsonResult = { ok: boolean; status: number; body: unknown };
 
-export default function TransactionsPage() {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [filtered, setFiltered] = useState<Transaction[]>([]);
-  const [search, setSearch] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+const isRecord = (v: unknown): v is UnknownRecord =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+const asOptString = (v: unknown): string | undefined => {
+  if (v === undefined || v === null) return undefined;
+  try {
+    return String(v);
+  } catch {
+    return undefined;
+  }
+};
+
+export default function AdminTransactionsPage(): React.ReactElement {
+  const dispatch = useDispatch<AppDispatch>();
+
+  const membersFromStore = useSelector((s: RootState) => {
+    const ms = (s as unknown as Record<string, unknown>)["members"] as
+      | Record<string, unknown>
+      | undefined;
+    const arr = Array.isArray(ms?.list)
+      ? ms.list
+      : Array.isArray(ms?.items)
+      ? ms.items
+      : Array.isArray(ms?.members)
+      ? ms.members
+      : [];
+    return (arr as unknown[]).map((it) =>
+      isRecord(it)
+        ? {
+            id: String(it._id ?? it.id ?? ""),
+            name: typeof it.name === "string" ? it.name : undefined,
+          }
+        : { id: String(it ?? ""), name: undefined }
+    );
+  });
 
   useEffect(() => {
-    const mockData: Transaction[] = [
-      { id: "1", user: "Rahul Sharma", amount: 1200, date: "2025-10-18", paymentType: "UPI", notes: "Monthly payment" },
-      { id: "2", user: "Aman Verma", amount: 900, date: "2025-10-20", paymentType: "Cash", notes: "Advance" },
-      { id: "3", user: "Priya Singh", amount: 1500, date: "2025-10-21", paymentType: "Bank Transfer", notes: "Full payment" },
-      { id: "4", user: "Raj Patel", amount: 700, date: "2025-10-22", paymentType: "UPI" },
-    ];
-    setTransactions(mockData);
-    setFiltered(mockData);
-  }, []);
+    if (!membersFromStore.length) dispatch(fetchMembers());
+  }, [dispatch, membersFromStore.length]);
 
-  const handleFilter = () => {
-    let data = transactions;
-
-    if (search.trim()) {
-      const s = search.toLowerCase();
-      data = data.filter(
-        (t) =>
-          t.user.toLowerCase().includes(s) ||
-          t.paymentType.toLowerCase().includes(s) ||
-          (t.notes && t.notes.toLowerCase().includes(s))
-      );
+  const memberNameMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const mm of membersFromStore) {
+      if (mm.id) m[mm.id] = mm.name ?? mm.id;
     }
-    if (startDate) data = data.filter((t) => new Date(t.date) >= new Date(startDate));
-    if (endDate) data = data.filter((t) => new Date(t.date) <= new Date(endDate));
-    setFiltered(data);
+    return m;
+  }, [membersFromStore]);
+
+  const [payments, setPayments] = useState<PendingPayment[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+
+  const log = (msg: string) => {
+    console.debug("[admin/transactions]", msg);
   };
 
-  // --- Overview Calculations ---
-  const totals = useMemo(() => {
-    const today = new Date().toISOString().split("T")[0];
-    const month = new Date().getMonth();
-    const year = new Date().getFullYear();
+  async function fetchJson(url: string, init?: RequestInit): Promise<FetchJsonResult> {
+    const res = await fetch(url, { credentials: "include", ...init });
+    const body = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, body };
+  }
 
-    const todayTotal = transactions
-      .filter((t) => t.date === today)
-      .reduce((sum, t) => sum + t.amount, 0);
+  function normalizePayment(
+    raw: unknown,
+    fallbackGroupId?: string,
+    fallbackGroupName?: string,
+    src?: string
+  ): PendingPayment {
+    const r: UnknownRecord = isRecord(raw) ? raw : {};
 
-    const monthTotal = transactions
-      .filter((t) => {
-        const d = new Date(t.date);
-        return d.getMonth() === month && d.getFullYear() === year;
-      })
-      .reduce((sum, t) => sum + t.amount, 0);
+    const memberFromMeta = isRecord(r.member) ? r.member : undefined;
+    const groupFromMeta = isRecord(r.group) ? r.group : undefined;
+    const rawMeta = isRecord(r.rawMeta) ? r.rawMeta : undefined;
 
-    const total = transactions.reduce((sum, t) => sum + t.amount, 0);
-    return { todayTotal, monthTotal, total };
-  }, [transactions]);
+    const memberId = asOptString(
+      r.memberId ?? (memberFromMeta ? memberFromMeta._id : undefined) ?? r.userId
+    );
+    const memberName = asOptString(
+      r.memberName ?? (memberFromMeta ? memberFromMeta.name : undefined) ?? r.name
+    );
+    const groupId = asOptString(
+      r.groupId ?? (groupFromMeta ? groupFromMeta._id : undefined) ?? fallbackGroupId
+    );
+    const groupName = asOptString(
+      r.groupName ?? (groupFromMeta ? groupFromMeta.name : undefined) ?? fallbackGroupName
+    );
+    const amount = Number(r.amount ?? r.amt ?? 0) || 0;
+    const createdAt = asOptString(r.createdAt ?? r.date);
+
+    const allocationSummary: unknown =
+      (rawMeta && rawMeta.allocationSummary !== undefined
+        ? rawMeta.allocationSummary
+        : undefined) ??
+      (rawMeta && rawMeta.appliedAllocation !== undefined
+        ? rawMeta.appliedAllocation
+        : undefined) ??
+      (rawMeta && rawMeta.allocation !== undefined ? rawMeta.allocation : undefined) ??
+      r.allocationSummary ??
+      r.allocation ??
+      undefined;
+
+    const utrValue =
+      r.utr !== undefined
+        ? r.utr
+        : r.txnId !== undefined
+        ? r.txnId
+        : r.reference !== undefined
+        ? r.reference
+        : undefined;
+    const noteValue =
+      r.note !== undefined
+        ? r.note
+        : r.adminNote !== undefined
+        ? r.adminNote
+        : undefined;
+    const fileValue =
+      r.fileUrl !== undefined
+        ? r.fileUrl
+        : r.attachment !== undefined
+        ? r.attachment
+        : undefined;
+
+    const verified = Boolean(r.verified ?? false);
+
+    return {
+      _id: asOptString(r._id ?? r.id ?? Math.random().toString(36).slice(2)) ?? "",
+      memberId: memberId ?? null,
+      memberName: memberName ?? null,
+      groupId: groupId ?? null,
+      groupName: groupName ?? null,
+      amount,
+      utr: asOptString(utrValue) ?? null,
+      note: asOptString(noteValue) ?? null,
+      fileUrl: asOptString(fileValue) ?? null,
+      createdAt,
+      allocationSummary,
+      verified,
+      _source: src,
+    };
+  }
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    setPayments([]);
+    try {
+      log("Trying /api/admin/transactions");
+      const adminResp = await fetchJson("/api/admin/transactions");
+      console.debug(adminResp);
+
+      if (adminResp.ok) {
+        let listUnknown: unknown[] = [];
+        if (isRecord(adminResp.body) && Array.isArray(adminResp.body.payments)) {
+          listUnknown = adminResp.body.payments as unknown[];
+        } else if (Array.isArray(adminResp.body)) {
+          listUnknown = adminResp.body as unknown[];
+        }
+
+        if (listUnknown.length > 0) {
+          setPayments(
+            listUnknown.map((r: unknown) =>
+              normalizePayment(r, undefined, undefined, "/api/admin/transactions")
+            )
+          );
+          setLoading(false);
+          return;
+        }
+        log("/api/admin/transactions returned empty list");
+      } else {
+        log(`/api/admin/transactions returned ${adminResp.status}`);
+      }
+
+      // fallback -> fetch groups then payments per group
+      log("Fetching /api/chitgroups for fallback");
+      const gResp = await fetchJson("/api/chitgroups");
+      if (!gResp.ok) {
+        log(`/api/chitgroups returned ${gResp.status}`);
+        setError("No pending transactions and fallback failed. Ensure admin session is active.");
+        setLoading(false);
+        return;
+      }
+
+      const bodyGroups = gResp.body;
+      let groupsArr: unknown[] = [];
+      if (isRecord(bodyGroups) && Array.isArray(bodyGroups.groups)) {
+        groupsArr = bodyGroups.groups as unknown[];
+      } else if (Array.isArray(bodyGroups)) {
+        groupsArr = bodyGroups as unknown[];
+      }
+
+      const concurrency = 6;
+      const pending: PendingPayment[] = [];
+
+      async function fetchGroupPayments(g: UnknownRecord) {
+        const gid = asOptString(g._id ?? g.id) ?? "";
+        if (!gid) return;
+        const pUrl = `/api/chitgroups/${encodeURIComponent(gid)}/payments?all=true`;
+        log(`Fetching ${pUrl}`);
+        const pRes = await fetchJson(pUrl);
+        if (!pRes.ok) {
+          log(` -> ${pUrl} returned ${pRes.status}`);
+          return;
+        }
+
+        const bodyPayments = pRes.body;
+        let arr: unknown[] = [];
+        if (Array.isArray(bodyPayments)) {
+          arr = bodyPayments as unknown[];
+        } else if (isRecord(bodyPayments) && Array.isArray(bodyPayments.payments)) {
+          arr = bodyPayments.payments as unknown[];
+        }
+
+        const fallbackName = asOptString(g.name ?? g.groupName);
+        for (const item of arr) {
+          pending.push(
+            normalizePayment(item, gid, fallbackName || undefined, "fallback")
+          );
+        }
+      }
+
+      for (let i = 0; i < groupsArr.length; i += concurrency) {
+        const slice = groupsArr.slice(i, i + concurrency);
+        await Promise.all(
+          slice.map((gg: unknown) =>
+            isRecord(gg) ? fetchGroupPayments(gg) : Promise.resolve()
+          )
+        );
+      }
+
+      log(`Fallback found ${pending.length} payments across groups`);
+      setPayments(pending);
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleAction(paymentId: string, approve: boolean) {
+    setError(null);
+    setActionLoading((s) => ({ ...s, [paymentId]: true }));
+    try {
+      const existing = payments.find((x) => x._id === paymentId);
+      const gid = existing?.groupId ?? undefined;
+      const url = gid
+        ? `/api/chitgroups/${encodeURIComponent(gid)}/payments/approve`
+        : "/api/admin/transactions";
+
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paymentId,
+          approve,
+          adminNote: approve ? "Approved via admin UI" : "Rejected via admin UI",
+        }),
+      });
+
+      const j: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        let errMsg = res.statusText || "Action failed";
+        if (isRecord(j)) {
+          const errVal =
+            j.error !== undefined ? j.error : j.message !== undefined ? j.message : undefined;
+          if (typeof errVal === "string") errMsg = errVal;
+        }
+        throw new Error(errMsg);
+      }
+
+      let returnedRaw: unknown = undefined;
+      if (isRecord(j) && isRecord(j.payment)) {
+        returnedRaw = j.payment;
+      } else if (isRecord(j)) {
+        returnedRaw = j;
+      }
+
+      const normalized = normalizePayment(
+        returnedRaw,
+        existing?.groupId ?? undefined,
+        existing?.groupName ?? undefined,
+        existing?._source ?? undefined
+      );
+      setPayments((cur) => cur.map((p) => (p._id === paymentId ? normalized : p)));
+      log(`Action ${approve ? "approve" : "reject"} ok for ${paymentId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      log(`Action error: ${String(err)}`);
+    } finally {
+      setActionLoading((s) => ({ ...s, [paymentId]: false }));
+    }
+  }
+
+  const getDisplayMemberName = (p: PendingPayment): string =>
+    p.memberName ??
+    memberNameMap[String(p.memberId ?? "")] ??
+    p.memberId ??
+    "Member";
+
+  const search = filter.toLowerCase().trim();
+  const filtered = useMemo(
+    () =>
+      payments.filter((p) => {
+        if (!search) return true;
+        const displayName = getDisplayMemberName(p).toLowerCase();
+        const groupName = String(p.groupName ?? p.groupId ?? "").toLowerCase();
+        const utr = String(p.utr ?? "").toLowerCase();
+        const idstr = String(p._id ?? "").toLowerCase();
+        return (
+          displayName.includes(search) ||
+          groupName.includes(search) ||
+          utr.includes(search) ||
+          idstr.includes(search)
+        );
+      }),
+    [payments, search, memberNameMap]
+  );
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 15 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: "easeInOut" }}
-      className="p-6 min-h-screen bg-[var(--bg-main)] text-[var(--text-primary)]"
-    >
-      <h1 className="text-2xl font-semibold mb-6 text-[var(--color-primary)]">Transactions</h1>
+    <div className="p-6 min-h-screen bg-[var(--bg-main)]">
+      <h1 className="text-2xl font-semibold mb-4">
+        Transactions / Pending Payments
+      </h1>
 
-      {/* Overview Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-        <StatCard title="Today's Total" value={`₹${totals.todayTotal}`} icon={Calendar} />
-        <StatCard title="This Month's Total" value={`₹${totals.monthTotal}`} icon={TrendingUp} />
-        <StatCard title="Overall Total" value={`₹${totals.total}`} icon={IndianRupee} />
+      <div className="mb-4">
+        <div className="flex gap-3 items-center">
+          <Input
+            placeholder="Search member / group / UTR..."
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+          <Button onClick={load} className="ml-auto" disabled={loading}>
+            {loading ? "Refreshing…" : "Refresh"}
+          </Button>
+        </div>
       </div>
 
-      {/* Filters */}
-      <Card className="bg-[var(--bg-card)] border border-[var(--border-color)] shadow-md mb-6">
-        <CardContent className="flex flex-wrap items-center gap-4 py-4">
-          <div className="flex items-center gap-2">
-            <Calendar className="text-[var(--color-primary)]" size={18} />
-            <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-          </div>
-          <div className="flex items-center gap-2">
-            <Calendar className="text-[var(--color-primary)]" size={18} />
-            <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-          </div>
-          <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-            <Search className="text-[var(--color-primary)]" size={18} />
-            <Input
-              placeholder="Search user, payment type..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-          <Button
-            onClick={handleFilter}
-            className="bg-[var(--btn-primary-bg)] hover:bg-[var(--btn-primary-hover)] text-[var(--text-light)] transition-all"
-          >
-            Apply Filter
-          </Button>
-        </CardContent>
-      </Card>
+      {error && <div className="text-red-600 mb-4">{error}</div>}
+      {loading && (
+        <div className="text-sm text-gray-500 mb-4">
+          Loading pending transactions…
+        </div>
+      )}
 
-      {/* Transaction Table */}
-      <Card className="bg-[var(--bg-card)] border border-[var(--border-color)] shadow-sm">
-        <CardContent className="overflow-x-auto">
-          <motion.table layout className="w-full text-sm border-collapse">
-            <thead>
-              <tr className="bg-[var(--bg-highlight)] text-[var(--text-secondary)] border-b border-[var(--border-color)]">
-                <th className="p-3 text-left font-medium">User</th>
-                <th className="p-3 text-left font-medium">Date</th>
-                <th className="p-3 text-left font-medium">Amount</th>
-                <th className="p-3 text-left font-medium">Payment Type</th>
-                <th className="p-3 text-left font-medium">Notes</th>
-              </tr>
-            </thead>
-            <motion.tbody layout>
-              {filtered.length > 0 ? (
-                filtered.map((t) => (
-                  <motion.tr
-                    key={t.id}
-                    layout
-                    whileHover={{ backgroundColor: "var(--bg-highlight)" }}
-                    transition={{ duration: 0.2 }}
-                    className="border-b border-[var(--border-color)]"
-                  >
-                    <td className="p-3 flex items-center gap-2 text-[var(--text-primary)]">
-                      <User size={16} className="text-[var(--color-secondary)]" />
-                      {t.user}
-                    </td>
-                    <td className="p-3">{t.date}</td>
-                    <td className="p-3">₹{t.amount}</td>
-                    <td className="p-3">{t.paymentType}</td>
-                    <td className="p-3 text-[var(--text-secondary)]">{t.notes || "-"}</td>
-                  </motion.tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={5} className="text-center text-[var(--text-secondary)] p-6 italic">
-                    No transactions found
-                  </td>
-                </tr>
-              )}
-            </motion.tbody>
-          </motion.table>
-        </CardContent>
-      </Card>
-    </motion.div>
+      <div className="space-y-3">
+        {filtered.length === 0 && !loading && (
+          <div className="text-sm text-gray-500">No payments.</div>
+        )}
+
+        {filtered.map((p) => {
+          const itemLoading = Boolean(actionLoading[p._id]);
+          const displayName = getDisplayMemberName(p);
+          const displayGroup = p.groupName ?? p.groupId ?? "Group";
+
+          const allocText =
+            typeof p.allocationSummary === "string"
+              ? p.allocationSummary
+              : JSON.stringify(p.allocationSummary ?? {}, null, 2);
+
+          return (
+            <Card key={p._id}>
+              <CardContent className="flex flex-col sm:flex-row justify-between gap-3 items-start">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-shrink-0 w-10 h-10 rounded-full bg-[var(--bg-highlight)] grid place-items-center">
+                      <User />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-lg">{displayName}</div>
+                      <div className="text-xs text-gray-500">
+                        {displayGroup}
+                        {p.verified ? (
+                          <span className="ml-2 text-xs text-green-600">
+                            • verified
+                          </span>
+                        ) : null}
+                        {p._source ? (
+                          <span className="ml-2 text-xs text-gray-400">
+                            · {p._source}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
+                    <div>
+                      <div className="text-xs text-gray-500">Amount</div>
+                      <div className="font-semibold">
+                        ₹{Number(p.amount).toLocaleString()}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500">UTR / Ref</div>
+                      <div className="font-medium">{p.utr ?? "-"}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-500">Received</div>
+                      <div className="text-xs text-gray-500">
+                        {p.createdAt
+                          ? new Date(p.createdAt).toLocaleString()
+                          : "-"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {p.note && (
+                    <div className="mt-3 text-sm text-gray-700">
+                      Note: {p.note}
+                    </div>
+                  )}
+
+                  {p.fileUrl && (
+                    <div className="mt-3">
+                      <div className="text-xs text-gray-500 mb-1">
+                        Attachment
+                      </div>
+                      <a
+                        className="text-sm text-blue-600 underline"
+                        href={String(p.fileUrl)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        View file
+                      </a>
+                    </div>
+                  )}
+
+                  {p.allocationSummary != null && (
+                    <div className="mt-3 text-sm">
+                      <div className="text-xs text-gray-500">
+                        Allocation plan (from user)
+                      </div>
+                      <pre className="text-xs bg-[var(--bg-main)] p-2 rounded max-w-full overflow-auto">
+                        {allocText}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-2 items-end">
+                  <div className="text-sm text-gray-500">Payment ID</div>
+                  <div className="font-mono text-xs">{p._id}</div>
+
+                  <div className="mt-2 flex gap-2">
+                    {!p.verified ? (
+                      <>
+                        <Button
+                          onClick={() => handleAction(p._id, true)}
+                          className="bg-green-600 hover:bg-green-700"
+                          disabled={itemLoading}
+                        >
+                          {itemLoading ? (
+                            "…"
+                          ) : (
+                            <>
+                              <Check /> Approve
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          onClick={() => handleAction(p._id, false)}
+                          className="bg-red-600 hover:bg-red-700"
+                          disabled={itemLoading}
+                        >
+                          {itemLoading ? (
+                            "…"
+                          ) : (
+                            <>
+                              <X /> Reject
+                            </>
+                          )}
+                        </Button>
+                      </>
+                    ) : (
+                      <div className="text-xs text-gray-500">
+                        No actions (verified)
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
   );
 }

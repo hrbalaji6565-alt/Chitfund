@@ -129,7 +129,7 @@ export default function AuthPage() {
 
   return (
     <section className="bg-[var(--bg-main)] text-[var(--text-primary)] font-sans overflow-hidden min-h-screen">
-      <Toaster position="top-center" />
+      {/* <Toaster position="top-center" /> */}
       <div className="max-w-7xl mx-auto min-h-screen flex flex-col md:flex-row relative transition-all duration-700 ease-in-out">
         <div className="hidden md:flex w-1/2 relative overflow-hidden">
           <motion.img

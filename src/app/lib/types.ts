@@ -1,22 +1,58 @@
+// src/app/lib/types.ts
+
+// existing app async status type (unchanged)
 export type Status = "idle" | "loading" | "succeeded" | "failed";
 
+// Chit-specific status used for groups (UI / domain statuses)
+export type ChitStatus = "Active" | "Completed" | "Pending" | "Closed" | "Inactive";
+
 export interface ChitGroup {
-  id: string | undefined;
+  // id may be provided as _id or id (string/number) by different APIs
   _id?: string;
-  name: string;
-  chitValue: number;
-  monthlyInstallment: number;
-  totalMonths: number;
-  totalMembers: number;
-  startDate: string;
-  endDate: string;
-  status: "Active" | "Closed" | "Inactive";
-  remarks?: string;
-    members?: string[]; 
+  id?: string | number;
+
+  // core name fields (some APIs use `name`, some `groupName`)
+  name?: string;
+  groupName?: string;
+
+  // original fields you already had (kept & made optional where appropriate)
+  chitValue?: number;
+  monthlyInstallment?: number;
+  totalMonths?: number;
+  totalMembers?: number;
+
+  // financial fields used by the UI (make optional if server may omit)
+  totalAmount?: number;
+  collectedAmount?: number;
+  pendingAmount?: number;
+
+  // schedule / dates
+  startDate?: string;     // ISO date string
+  endDate?: string;       // your existing endDate
+  maturityDate?: string;  // alias used in UI if present
+
+  // installments tracking
+  numberOfInstallments?: number;
+  completedInstallments?: number;
+
+  // other display / domain fields
+  interestRate?: number;
   penaltyPercent?: number;
+  remarks?: string;
+  members?: string[]; // keep as previously
+    winners?: string[];
+
+  // timestamps
   createdAt?: string;
   updatedAt?: string;
+
+  // domain status
+  status?: ChitStatus;
+
+  // allow extra backend fields without TS errors
+  [k: string]: unknown;
 }
+
 
 // src/store/types.ts
 export type MemberStatus = "Active" | "Inactive";
@@ -74,3 +110,24 @@ export interface Member {
 }
 
 export type AsyncStatus = "idle" | "loading" | "succeeded" | "failed";
+
+export interface Contribution {
+  _id?: string;
+  chitId: string;
+  memberId: string;
+  amount: number;
+  date: string; // ISO
+  monthIndex: number; // 1..totalMonths (which month this contribution counts for)
+}
+
+export interface AuctionResult {
+  _id?: string;
+  chitId: string;
+  monthIndex: number;
+  totalPot: number; // e.g., chitValue
+  winningMemberId: string;
+  winningBidAmount: number; // discount (amount kept as discount)
+  winningPayout: number; // amount the winner actually takes (totalPot - winningBidAmount)
+  distributedToMembers: Array<{ memberId: string; amount: number }>;
+  createdAt?: string;
+}
