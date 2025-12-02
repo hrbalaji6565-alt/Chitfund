@@ -4,24 +4,31 @@ import type { NextRequest } from "next/server";
 
 export function middleware(req: NextRequest) {
   const url = req.nextUrl.clone();
-  const pathname = req.nextUrl.pathname;
+  const pathname = url.pathname;
 
-  // IMPORTANT: read only cookies here (edge runtime)
+  // Sirf cookies se token lo (edge runtime)
   const adminToken = req.cookies.get("adminToken")?.value || "";
-  const memberToken = req.cookies.get("memberToken")?.value || localStorage.getItem("memberToken") || "";
+  const memberToken = req.cookies.get("memberToken")?.value || "";
 
-  // Protect admin routes
-  if (pathname.startsWith("/admin")) {
+  const isAdminPath = pathname.startsWith("/admin");
+  const isAdminLogin = pathname === "/";
+
+  const isUserPath =
+    pathname === "/user" || pathname.startsWith("/user/");
+  const isUserLogin = pathname === "/";
+
+  // 🔒 Admin routes protect (login page ko chhod ke)
+  if (isAdminPath && !isAdminLogin) {
     if (!adminToken) {
-      url.pathname = "/";
+      url.pathname = "/"; // ya "/" agar home pe bhejna hai
       return NextResponse.redirect(url);
     }
   }
 
-  // Protect user routes (exact /user and any subpath)
-  if (pathname === "/user" || pathname.startsWith("/user/")) {
+  // 🔒 User routes protect (login ko chhod ke)
+  if (isUserPath && !isUserLogin) {
     if (!memberToken) {
-      url.pathname = "/";
+      url.pathname = "/"; // ya "/" agar home pe bhejna hai
       url.searchParams.set("next", pathname);
       return NextResponse.redirect(url);
     }
