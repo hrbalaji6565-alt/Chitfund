@@ -5,7 +5,7 @@ export interface IBid extends Document {
   chitId: string;
   memberId: string;
   monthIndex: number;
-  discountOffered: number; // how much discount the member offers (e.g. 10000)
+  discountOffered: number;
   createdAt?: Date;
 }
 
@@ -16,5 +16,7 @@ const BidSchema = new Schema<IBid>({
   discountOffered: { type: Number, required: true },
 }, { timestamps: true });
 
-const Bid: Model<IBid> = (mongoose.models.Bid as Model<IBid>) || mongoose.model<IBid>("Bid", BidSchema);
+const Bid: Model<IBid> =
+  (mongoose.models.Bid as Model<IBid>) || mongoose.model<IBid>("Bid", BidSchema);
+
 export default Bid;

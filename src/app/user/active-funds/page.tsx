@@ -1,7 +1,11 @@
-// src/app/components/UserActiveFunds.tsx
 "use client";
 
-import React, { useMemo, useState, useEffect, useCallback } from "react";
+import React, {
+  useMemo,
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
 import QRCode from "qrcode";
 import { motion, AnimatePresence } from "framer-motion";
 import { Calendar, Search as SearchIcon } from "lucide-react";
@@ -21,23 +25,27 @@ const isRecord = (x: unknown): x is AnyObject =>
   typeof x === "object" && x !== null && !Array.isArray(x);
 
 const toStr = (v: unknown, d = ""): string =>
-  typeof v === "string" ? v : typeof v === "number" ? String(v) : d;
+  typeof v === "string"
+    ? v
+    : typeof v === "number"
+      ? String(v)
+      : d;
 
 const toNum = (v: unknown, d = 0): number =>
   typeof v === "number" && !Number.isNaN(v)
     ? v
     : typeof v === "string" && v.trim()
-    ? Number(v) || d
-    : d;
+      ? Number(v) || d
+      : d;
 
 const idStr = (x: unknown) =>
   typeof x === "string"
     ? x
     : typeof x === "number"
-    ? String(x)
-    : isRecord(x)
-    ? toStr(x._id ?? x.id ?? "")
-    : "";
+      ? String(x)
+      : isRecord(x)
+        ? toStr(x._id ?? x.id ?? "")
+        : "";
 
 const monthsElapsedSinceStart = (start?: string) => {
   if (!start) return 1;
@@ -45,7 +53,8 @@ const monthsElapsedSinceStart = (start?: string) => {
   if (Number.isNaN(s.getTime())) return 1;
   const n = new Date();
   let months =
-    (n.getFullYear() - s.getFullYear()) * 12 + (n.getMonth() - s.getMonth());
+    (n.getFullYear() - s.getFullYear()) * 12 +
+    (n.getMonth() - s.getMonth());
   if (n.getDate() < s.getDate()) months -= 1;
   return Math.max(1, months + 1);
 };
@@ -86,6 +95,7 @@ type OverdueInfo = {
   penaltyIfNow: number;
   details: OverdueDetail[];
   maxPayableIfClearNow: number;
+  currentMonthPenalty: number;
 };
 
 type AllocationItem = {
@@ -109,16 +119,26 @@ type FundView = {
   interestRate: number;
   numberOfInstallments: number;
   completedInstallments: number;
+  installmentProgress: number;
   raw: unknown;
 };
 
-/* ---------- Payment panel (inline) ---------- */
+type MemberFundSummary = {
+  groupId: string;
+  totalFunds: number;
+  collected: number;
+  pending: number;
+};
+
+/* ---------- Payment panel ---------- */
 function PaymentPanel({
   groupObj,
   memberId,
+  onSummaryChange,
 }: {
   groupObj: unknown;
   memberId: string;
+  onSummaryChange?: (summary: MemberFundSummary) => void;
 }) {
   const [payments, setPayments] = useState<AnyObject[]>([]);
   const [loading, setLoading] = useState(false);
@@ -131,21 +151,40 @@ function PaymentPanel({
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [showQr, setShowQr] = useState(false);
 
+  const [auctionDiscountShare, setAuctionDiscountShare] = useState(0);
+  const [canPayThisMonth, setCanPayThisMonth] = useState(false);
+  const [auctionDate, setAuctionDate] = useState<string | null>(null);
+  const [auctionMonthIndex, setAuctionMonthIndex] =
+    useState<number | null>(null);
+
+  // winner payout for this user (agar jeeta hai)
+  const [myWinningPayout, setMyWinningPayout] = useState(0);
+
   // derived
   const perMember = useMemo(() => {
     if (!isRecord(groupObj)) return 0;
-    const monthly = toNum(groupObj.monthlyInstallment ?? groupObj.monthly ?? 0);
+    const monthly = toNum(
+      groupObj.monthlyInstallment ?? groupObj.monthly ?? 0,
+    );
     const members = Math.max(
       1,
       toNum(
         groupObj.totalMembers ??
-          (Array.isArray(groupObj.members) ? groupObj.members.length : 0),
+          (Array.isArray(groupObj.members)
+            ? groupObj.members.length
+            : 0),
       ),
     );
-    const chit = toNum(groupObj.chitValue ?? groupObj.totalAmount ?? 0);
+    const chit = toNum(
+      groupObj.chitValue ?? groupObj.totalAmount ?? 0,
+    );
     const months = Math.max(
       1,
-      toNum(groupObj.totalMonths ?? groupObj.numberOfInstallments ?? 1),
+      toNum(
+        groupObj.totalMonths ??
+          groupObj.numberOfInstallments ??
+          1,
+      ),
     );
     if (monthly > 0) return Math.round(monthly);
     if (chit > 0 && months > 0) {
@@ -157,11 +196,17 @@ function PaymentPanel({
     return 0;
   }, [groupObj]);
 
-  const startDate = isRecord(groupObj) ? toStr(groupObj.startDate ?? "") : "";
+  const startDate = isRecord(groupObj)
+    ? toStr(groupObj.startDate ?? "")
+    : "";
   const totalMonthsFromModel = isRecord(groupObj)
     ? Math.max(
         1,
-        toNum(groupObj.totalMonths ?? groupObj.numberOfInstallments ?? 12),
+        toNum(
+          groupObj.totalMonths ??
+            groupObj.numberOfInstallments ??
+            12,
+        ),
       )
     : 12;
   const penaltyPercent = isRecord(groupObj)
@@ -177,15 +222,24 @@ function PaymentPanel({
   // helper: extract member id from a payment record robustly
   const extractPaymentMemberId = (p: AnyObject): string | undefined => {
     const memberIdField = p.memberId;
-    if (typeof memberIdField === "string" && memberIdField) return memberIdField;
+    if (typeof memberIdField === "string" && memberIdField) {
+      return memberIdField;
+    }
     const memberField = p.member;
-    if (typeof memberField === "string" && memberField) return memberField;
+    if (typeof memberField === "string" && memberField) {
+      return memberField;
+    }
     if (isRecord(memberField)) {
       return toStr(
-        memberField._id ?? memberField.id ?? memberField.memberId ?? "",
+        memberField._id ??
+          memberField.id ??
+          memberField.memberId ??
+          "",
       );
     }
-    if (typeof memberIdField === "number") return String(memberIdField);
+    if (typeof memberIdField === "number") {
+      return String(memberIdField);
+    }
     return undefined;
   };
 
@@ -195,16 +249,21 @@ function PaymentPanel({
       const map = new Map<string, AnyObject>();
       for (const p of arr) {
         if (!isRecord(p)) continue;
-        const idSource = p._id ?? p.id ?? Math.random().toString(36).slice(2);
+        const idSource =
+          p._id ?? p.id ?? Math.random().toString(36).slice(2);
         const pid = toStr(idSource);
         if (!pid) continue;
 
         const existing = map.get(pid);
         if (existing) {
           const existingGood = Boolean(
-            existing.verified ?? existing.isVerified ?? existing.approvedAt,
+            existing.verified ??
+              existing.isVerified ??
+              existing.approvedAt,
           );
-          const curGood = Boolean(p.verified ?? p.isVerified ?? p.approvedAt);
+          const curGood = Boolean(
+            p.verified ?? p.isVerified ?? p.approvedAt,
+          );
           if (curGood && !existingGood) {
             map.set(pid, p);
           }
@@ -224,7 +283,7 @@ function PaymentPanel({
     [memberId],
   );
 
-  /* fetch payments for this member & group (tolerant shapes) */
+  /* fetch payments for this member & group */
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -240,15 +299,21 @@ function PaymentPanel({
         }
         const url = `/api/chitgroups/${encodeURIComponent(
           gid,
-        )}/payments?memberId=${encodeURIComponent(memberId)}&all=true`;
+        )}/payments?memberId=${encodeURIComponent(
+          memberId,
+        )}&all=true`;
         const res = await fetch(url, { credentials: "include" });
-        const j = await res.json().catch(() => []);
+        const j = await res.json().catch(() => [] as unknown);
         if (!alive) return;
         let arr: unknown[] = [];
         if (Array.isArray(j)) arr = j;
-        else if (isRecord(j) && Array.isArray(j.payments)) arr = j.payments;
-        else if (isRecord(j) && Array.isArray(j.data)) arr = j.data;
-        else if (isRecord(j) && Array.isArray(j.items)) arr = j.items;
+        else if (isRecord(j) && Array.isArray(j.payments)) {
+          arr = j.payments;
+        } else if (isRecord(j) && Array.isArray(j.data)) {
+          arr = j.data;
+        } else if (isRecord(j) && Array.isArray(j.items)) {
+          arr = j.items;
+        }
         const filtered = normalizeAndFilterPayments(arr);
         if (alive) setPayments(filtered);
       } catch (e) {
@@ -267,10 +332,22 @@ function PaymentPanel({
   // helper: parse allocation entries present inside a payment record
   const parseAllocations = (
     raw: AnyObject,
-  ): { monthIndex: number; principal: number; penalty: number }[] | undefined => {
+  ):
+    | {
+        monthIndex: number;
+        principal: number;
+        penalty: number;
+      }[]
+    | undefined => {
     const tryParse = (
       cand: unknown,
-    ): { monthIndex?: number; principal?: unknown; penalty?: unknown }[] | undefined => {
+    ):
+      | {
+          monthIndex?: number;
+          principal?: unknown;
+          penalty?: unknown;
+        }[]
+      | undefined => {
       if (!cand) return undefined;
       if (Array.isArray(cand) && cand.length) {
         return cand as {
@@ -327,17 +404,25 @@ function PaymentPanel({
     for (const c of candidates) {
       const arr = tryParse(c);
       if (arr && arr.length) {
-        const norm: { monthIndex: number; principal: number; penalty: number }[] =
-          [];
+        const norm: {
+          monthIndex: number;
+          principal: number;
+          penalty: number;
+        }[] = [];
         for (const item of arr) {
           const obj: AnyObject = isRecord(item) ? item : {};
           let m = obj.monthIndex;
           if (typeof m === "number" && m >= 0 && m < 1) m += 1;
-          if (m === undefined && typeof raw.monthIndex === "number") {
+          if (
+            m === undefined &&
+            typeof raw.monthIndex === "number"
+          ) {
             m = raw.monthIndex;
           }
           const monthIndex =
-            typeof m === "number" && !Number.isNaN(m) ? Math.round(m) : 1;
+            typeof m === "number" && !Number.isNaN(m)
+              ? Math.round(m)
+              : 1;
 
           const principal = toNum(
             obj.principalPaid ??
@@ -347,7 +432,9 @@ function PaymentPanel({
               obj.amount ??
               0,
           );
-          const penalty = toNum(obj.penaltyPaid ?? obj.penalty ?? obj.pen ?? 0);
+          const penalty = toNum(
+            obj.penaltyPaid ?? obj.penalty ?? obj.pen ?? 0,
+          );
           norm.push({
             monthIndex: Math.max(1, monthIndex),
             principal,
@@ -360,37 +447,42 @@ function PaymentPanel({
     return undefined;
   };
 
-  /* compute month-wise summary from payments (only approved/verified payments count) */
+  /* month-wise summary (discount applied for current month) */
   const monthsSummary: MonthType[] = useMemo(() => {
-    const monthsCount = Math.max(totalMonthsFromModel || 12, curMonth); // show at least up to current month
+    const monthsCount = Math.max(
+      totalMonthsFromModel || 12,
+      curMonth,
+    );
 
-    const months: MonthType[] = Array.from({ length: monthsCount }, (_, i) => {
-      const label = (() => {
-        if (!startDate) {
-          const d = new Date();
-          d.setMonth(d.getMonth() - (monthsCount - 1 - i));
+    const months: MonthType[] = Array.from(
+      { length: monthsCount },
+      (_, i) => {
+        const label = (() => {
+          if (!startDate) {
+            const d = new Date();
+            d.setMonth(d.getMonth() - (monthsCount - 1 - i));
+            return `${d.toLocaleString(undefined, {
+              month: "short",
+            })} ${d.getFullYear()}`;
+          }
+          const s = new Date(startDate);
+          const d = new Date(s.getFullYear(), s.getMonth() + i, 1);
           return `${d.toLocaleString(undefined, {
             month: "short",
           })} ${d.getFullYear()}`;
-        }
-        const s = new Date(startDate);
-        const d = new Date(s.getFullYear(), s.getMonth() + i, 1);
-        return `${d.toLocaleString(undefined, {
-          month: "short",
-        })} ${d.getFullYear()}`;
-      })();
-      return {
-        idx: i + 1,
-        label,
-        paid: 0,
-        penalty: 0,
-        details: [],
-        status: "Unpaid",
-        remaining: perMember,
-      };
-    });
+        })();
+        return {
+          idx: i + 1,
+          label,
+          paid: 0,
+          penalty: 0,
+          details: [],
+          status: "Unpaid",
+          remaining: perMember,
+        };
+      },
+    );
 
-    // helper to add amount to month bucket
     const addToMonth = (
       mIdx: number,
       principal: number,
@@ -409,13 +501,18 @@ function PaymentPanel({
       if (!isRecord(p)) continue;
       const rawStatus = p.status ?? p.state;
       const statusStr =
-        typeof rawStatus === "string" ? rawStatus.toLowerCase() : undefined;
-      const verifiedFlag = Boolean(p.verified ?? p.isVerified ?? false);
+        typeof rawStatus === "string"
+          ? rawStatus.toLowerCase()
+          : undefined;
+      const verifiedFlag = Boolean(
+        p.verified ?? p.isVerified ?? false,
+      );
       const approvedAtFlag = Boolean(p.approvedAt);
       const isApproved =
-        statusStr === "approved" || verifiedFlag || approvedAtFlag;
+        statusStr === "approved" ||
+        verifiedFlag ||
+        approvedAtFlag;
 
-      // Only count approved payments toward month totals and overdue calculation
       if (!isApproved) continue;
 
       const allocs = parseAllocations(p);
@@ -424,11 +521,12 @@ function PaymentPanel({
           addToMonth(a.monthIndex, a.principal, a.penalty, {
             id: toStr(p._id ?? p.id),
             date: toStr(p.date ?? p.createdAt),
-            ref: toStr(p.reference ?? p.txnId ?? p.utr ?? ""),
+            ref: toStr(
+              p.reference ?? p.txnId ?? p.utr ?? "",
+            ),
           });
         }
       } else {
-        // fallback: detect monthIndex from payment or date
         let monthIndex: number | undefined;
         if (typeof p.monthIndex === "number") {
           monthIndex = p.monthIndex;
@@ -437,8 +535,13 @@ function PaymentPanel({
           typeof p.allocation.monthIndex === "number"
         ) {
           monthIndex = p.allocation.monthIndex;
-        } else if (typeof p.date === "string" || typeof p.createdAt === "string") {
-          const d = new Date((p.date ?? p.createdAt) as string);
+        } else if (
+          typeof p.date === "string" ||
+          typeof p.createdAt === "string"
+        ) {
+          const d = new Date(
+            (p.date ?? p.createdAt) as string,
+          );
           if (startDate) {
             const sdate = new Date(startDate);
             monthIndex =
@@ -446,7 +549,6 @@ function PaymentPanel({
               (d.getMonth() - sdate.getMonth()) +
               1;
           } else {
-            // if no startDate, assume current month
             monthIndex = curMonth;
           }
         } else {
@@ -460,23 +562,37 @@ function PaymentPanel({
           {
             id: toStr(p._id ?? p.id),
             date: toStr(p.date ?? p.createdAt),
-            ref: toStr(p.reference ?? p.txnId ?? p.utr ?? ""),
+            ref: toStr(
+              p.reference ?? p.txnId ?? p.utr ?? "",
+            ),
           },
         );
       }
     }
 
-    // finalize status for each month
     for (const m of months) {
-      const expected = perMember;
+      const expectedForMonth =
+        m.idx === curMonth
+          ? Math.max(
+              0,
+              perMember -
+                Math.round(auctionDiscountShare ?? 0),
+            )
+          : perMember;
+
       m.status =
-        m.paid >= expected
+        m.paid >= expectedForMonth
           ? "Paid in full"
           : m.paid === 0
-          ? "Unpaid"
-          : "Partial";
-      m.remaining = Math.max(0, perMember - m.paid);
+            ? "Unpaid"
+            : "Partial";
+
+      m.remaining = Math.max(
+        0,
+        expectedForMonth - m.paid,
+      );
     }
+
     return months;
   }, [
     payments,
@@ -485,25 +601,167 @@ function PaymentPanel({
     perMember,
     curMonth,
     parseAllocations,
+    auctionDiscountShare,
   ]);
 
-  // paid this month is simply monthsSummary[curMonth-1].paid (only approved)
   const paidThisMonth = useMemo(() => {
     const bucket = monthsSummary[curMonth - 1];
     return bucket ? Math.round(bucket.paid) : 0;
   }, [monthsSummary, curMonth]);
 
-  const monthlyRemaining = Math.max(0, perMember - paidThisMonth);
+  /* fetch auction info for discount + gating payments + winner payout */
+  useEffect(() => {
+    let alive = true;
 
-  /* overdue & penalty (compound) + compute maxPayable (remaining + penalty) */
+    (async () => {
+      setAuctionDiscountShare(0);
+      setCanPayThisMonth(false);
+      setAuctionDate(null);
+      setAuctionMonthIndex(null);
+      setMyWinningPayout(0);
+
+      if (!isRecord(groupObj)) return;
+      const gid = toStr(groupObj._id ?? groupObj.id ?? "");
+      if (!gid || !memberId) return;
+
+      try {
+        const url = `/api/chitgroups/${encodeURIComponent(
+          gid,
+        )}/auction?monthIndex=${curMonth}`;
+        const res = await fetch(url, {
+          credentials: "include",
+        });
+        const json: unknown = await res
+          .json()
+          .catch(() => ({} as unknown));
+        if (!alive) return;
+
+        let auctionRaw: AnyObject | null = null;
+
+        if (isRecord(json)) {
+          if (isRecord(json.auction)) {
+            auctionRaw = json.auction;
+          } else if (isRecord(json.data)) {
+            auctionRaw = json.data;
+          } else if (Array.isArray(json.auctions)) {
+            const arr = json.auctions;
+            const withMonth = arr.filter(
+              (a) =>
+                isRecord(a) &&
+                typeof a.monthIndex === "number" &&
+                a.monthIndex === curMonth,
+            );
+            const pick =
+              (withMonth[0] as AnyObject | undefined) ??
+              (arr[arr.length - 1] as AnyObject | undefined);
+            if (pick && isRecord(pick)) auctionRaw = pick;
+          }
+        }
+
+        if (!auctionRaw) {
+          if (alive) {
+            setAuctionDiscountShare(0);
+            setCanPayThisMonth(false);
+            setMyWinningPayout(0);
+          }
+          return;
+        }
+
+        // winner info
+        const winningMemberId = toStr(
+          auctionRaw.winningMemberId ??
+            (auctionRaw as { winner?: unknown }).winner ??
+            "",
+        );
+        const winningPayout = toNum(
+          auctionRaw.winningPayout ??
+            (auctionRaw as { payoutToWinner?: unknown })
+              .payoutToWinner ??
+            0,
+        );
+
+        if (winningMemberId && winningMemberId === memberId) {
+          setMyWinningPayout(winningPayout);
+        } else {
+          setMyWinningPayout(0);
+        }
+
+        const distRaw = auctionRaw.distributedToMembers;
+        if (!Array.isArray(distRaw)) {
+          if (alive) setAuctionDiscountShare(0);
+        } else {
+          let myShare = 0;
+          for (const d of distRaw) {
+            if (!isRecord(d)) continue;
+            const mid = idStr(d.memberId ?? d.id ?? "");
+            if (!mid) continue;
+            if (mid === memberId) {
+              myShare = toNum(d.amount, 0);
+              break;
+            }
+          }
+          if (alive) setAuctionDiscountShare(myShare);
+        }
+
+        const mIdx = toNum(
+          auctionRaw.monthIndex ??
+            (auctionRaw as {
+              biddingMonthIndex?: unknown;
+            }).biddingMonthIndex ??
+            curMonth,
+          curMonth,
+        );
+        const normalizedMonth =
+          Number.isFinite(mIdx) && mIdx > 0
+            ? Math.round(mIdx)
+            : curMonth;
+        if (alive) {
+          setAuctionMonthIndex(normalizedMonth);
+          setCanPayThisMonth(normalizedMonth === curMonth);
+        }
+
+        const createdAt =
+          typeof auctionRaw.createdAt === "string"
+            ? auctionRaw.createdAt
+            : typeof auctionRaw.date === "string"
+              ? auctionRaw.date
+              : null;
+        if (alive) setAuctionDate(createdAt);
+      } catch {
+        if (alive) {
+          setAuctionDiscountShare(0);
+          setCanPayThisMonth(false);
+          setMyWinningPayout(0);
+        }
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [groupObj, memberId, curMonth]);
+
+  const expectedThisMonth = Math.max(
+    0,
+    perMember - Math.round(auctionDiscountShare),
+  );
+  const monthlyRemaining = Math.max(
+    0,
+    expectedThisMonth - paidThisMonth,
+  );
+
+  /* overdue & penalty (compound) + current-month penalty after 4 days */
   const overdue = useMemo<OverdueInfo>(() => {
     const info: OverdueInfo = {
       totalRem: 0,
       penaltyIfNow: 0,
       details: [],
       maxPayableIfClearNow: 0,
+      currentMonthPenalty: 0,
     };
     const per = perMember;
+
+    // old months (< curMonth)
     for (let mi = 1; mi < curMonth; mi += 1) {
       const b = monthsSummary[mi - 1];
       const paid = b ? b.paid : 0;
@@ -527,11 +785,108 @@ function PaymentPanel({
         });
       }
     }
+
+    // current month penalty after 4 days from auction
+    if (
+      auctionMonthIndex === curMonth &&
+      auctionDate &&
+      monthlyRemaining > 0 &&
+      penaltyPercent > 0
+    ) {
+      const aDate = new Date(auctionDate);
+      if (!Number.isNaN(aDate.getTime())) {
+        const now = new Date();
+        const diffMs = now.getTime() - aDate.getTime();
+        const diffDays = Math.floor(
+          diffMs / (1000 * 60 * 60 * 24),
+        );
+        if (diffDays > 4) {
+          const pen = Math.round(
+            monthlyRemaining * (penaltyPercent / 100),
+          );
+          info.currentMonthPenalty = pen;
+          info.penaltyIfNow += pen;
+        }
+      }
+    }
+
     info.maxPayableIfClearNow = Math.round(
-      info.totalRem + info.penaltyIfNow + monthlyRemaining,
+      info.totalRem +
+        info.penaltyIfNow +
+        monthlyRemaining,
     );
     return info;
-  }, [monthsSummary, perMember, curMonth, penaltyPercent, monthlyRemaining]);
+  }, [
+    monthsSummary,
+    perMember,
+    curMonth,
+    penaltyPercent,
+    monthlyRemaining,
+    auctionMonthIndex,
+    auctionDate,
+  ]);
+
+    /* member-level fund summary for top cards */
+  const memberAggregate = useMemo<MemberFundSummary | null>(() => {
+    if (!isRecord(groupObj)) return null;
+
+    const gid = toStr(groupObj._id ?? groupObj.id ?? "");
+    if (!gid) return null;
+
+    // fund jitne ka hai utna hi total (100000 etc.)
+    const chitValue = toNum(
+      (groupObj as { chitValue?: unknown }).chitValue ??
+        (groupObj as { totalAmount?: unknown }).totalAmount ??
+        perMember * totalMonthsFromModel,
+    );
+    const totalFundsForMember =
+      chitValue > 0 ? chitValue : perMember * totalMonthsFromModel;
+
+    // saare months ka principal jo user ne pay kiya
+    const totalPaidPrincipal = monthsSummary.reduce(
+      (sum, m) => sum + m.paid,
+      0,
+    );
+
+    // is month ka discount:
+    // EMI 10000, auction ke baad 9000 → discount = 1000
+    const discountCurrentMonth = Math.max(
+      0,
+      perMember - expectedThisMonth,
+    );
+
+    // jitna actual pay karna hai (discount minus karke)
+    const effectiveTotalPayable =
+      totalFundsForMember - discountCurrentMonth;
+
+    // pending = payable - jo pay ho chuka
+    const pendingForMember = Math.max(
+      0,
+      effectiveTotalPayable - totalPaidPrincipal,
+    );
+
+    return {
+      groupId: gid,
+      totalFunds: totalFundsForMember,
+      // collected me sirf user ka paid amount
+      collected: Math.round(totalPaidPrincipal),
+      // pending me discount adjust karke bacha hua
+      pending: Math.round(pendingForMember),
+    };
+  }, [
+    groupObj,
+    perMember,
+    totalMonthsFromModel,
+    monthsSummary,
+    expectedThisMonth,
+  ]);
+
+
+
+  useEffect(() => {
+    if (!memberAggregate || !onSummaryChange) return;
+    onSummaryChange(memberAggregate);
+  }, [memberAggregate, onSummaryChange]);
 
   /* UPI & QR generation using qrcode lib */
   const upiId = isRecord(groupObj)
@@ -543,14 +898,22 @@ function PaymentPanel({
       )
     : "7489988065@ibl";
   const payee = isRecord(groupObj)
-    ? toStr(groupObj.name ?? groupObj.groupName ?? "ChitFund")
+    ? toStr(
+        groupObj.name ??
+          groupObj.groupName ??
+          "ChitFund",
+      )
     : "ChitFund";
 
   const upiPayload = useMemo(() => {
     if (!upiId) return "";
     const amt =
-      typeof amount === "number" && amount > 0 ? String(amount) : "";
-    const noteStr = note ? `&tn=${encodeURIComponent(note)}` : "";
+      typeof amount === "number" && amount > 0
+        ? String(amount)
+        : "";
+    const noteStr = note
+      ? `&tn=${encodeURIComponent(note)}`
+      : "";
     return `upi://pay?pa=${encodeURIComponent(
       upiId,
     )}&pn=${encodeURIComponent(payee)}${
@@ -581,7 +944,9 @@ function PaymentPanel({
     };
   }, [showQr, upiPayload]);
 
-  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  function onFileChange(
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) {
     const f = e.target.files && e.target.files[0];
     setFile(f ?? null);
   }
@@ -596,19 +961,32 @@ function PaymentPanel({
       setErr("Member missing");
       return;
     }
+    if (!canPayThisMonth) {
+      setErr(
+        "Auction for this month is not completed yet. You can pay after winner is decided.",
+      );
+      return;
+    }
     if (typeof amount !== "number" || amount <= 0) {
       setErr("Enter amount");
       return;
     }
     const maxPayNow = overdue.maxPayableIfClearNow;
     if (amount > maxPayNow) {
-      setErr(`Max payable now (incl. overdue & penalty): ₹${maxPayNow}`);
+      setErr(
+        `Max payable now (incl. overdue, current penalty & this month): ₹${maxPayNow}`,
+      );
       return;
     }
 
     setSubmitting(true);
     try {
-      const gid = toStr(groupObj._id ?? groupObj.id ?? "");
+      const gid = toStr(
+        (groupObj as { _id?: unknown; id?: unknown })._id ??
+          (groupObj as { _id?: unknown; id?: unknown })
+            .id ??
+          "",
+      );
       const url = `/api/chitgroups/${encodeURIComponent(
         gid,
       )}/payments/request`;
@@ -622,10 +1000,16 @@ function PaymentPanel({
       const allocationSummary: AllocationItem[] = [];
       let remainingToAllocate = amount;
 
+      // old months first
       for (const d of overdue.details) {
         if (remainingToAllocate <= 0) break;
-        const totalForMonth = Math.round(d.remaining + d.penalty);
-        const apply = Math.min(remainingToAllocate, totalForMonth);
+        const totalForMonth = Math.round(
+          d.remaining + d.penalty,
+        );
+        const apply = Math.min(
+          remainingToAllocate,
+          totalForMonth,
+        );
         allocationSummary.push({
           monthIndex: d.monthIndex,
           due: d.remaining,
@@ -635,24 +1019,46 @@ function PaymentPanel({
         remainingToAllocate -= apply;
       }
 
-      if (remainingToAllocate > 0 && monthlyRemaining > 0) {
-        const apply = Math.min(remainingToAllocate, monthlyRemaining);
+      // current month (principal + penalty if any)
+      if (
+        remainingToAllocate > 0 &&
+        (monthlyRemaining > 0 ||
+          overdue.currentMonthPenalty > 0)
+      ) {
+        const totalForMonth = Math.round(
+          monthlyRemaining + overdue.currentMonthPenalty,
+        );
+        const apply = Math.min(
+          remainingToAllocate,
+          totalForMonth,
+        );
         allocationSummary.push({
           monthIndex: curMonth,
           due: monthlyRemaining,
-          penalty: 0,
+          penalty: overdue.currentMonthPenalty,
           apply,
         });
         remainingToAllocate -= apply;
       }
 
       const allocationPlannedTotal = amount;
-      const allocationUnallocated = Math.max(0, remainingToAllocate);
+      const allocationUnallocated = Math.max(
+        0,
+        remainingToAllocate,
+      );
 
-      // Provide allocationSummary as a JSON string so server can parse
-      fd.append("allocationSummary", JSON.stringify(allocationSummary));
-      fd.append("allocationPlannedTotal", String(allocationPlannedTotal));
-      fd.append("allocationUnallocated", String(allocationUnallocated));
+      fd.append(
+        "allocationSummary",
+        JSON.stringify(allocationSummary),
+      );
+      fd.append(
+        "allocationPlannedTotal",
+        String(allocationPlannedTotal),
+      );
+      fd.append(
+        "allocationUnallocated",
+        String(allocationUnallocated),
+      );
       if (file) fd.append("file", file);
 
       const res = await fetch(url, {
@@ -660,7 +1066,6 @@ function PaymentPanel({
         credentials: "include",
         body: fd,
       });
-      // If server returns non-json (HTML error), still read and show
       const text = await res.text();
       let parsed: unknown = {};
       try {
@@ -670,10 +1075,16 @@ function PaymentPanel({
       }
       if (!res.ok) {
         // eslint-disable-next-line no-console
-        console.error("payment request failed:", res.status, text);
+        console.error(
+          "payment request failed:",
+          res.status,
+          text,
+        );
         if (isRecord(parsed)) {
           const msg =
-            toStr(parsed.error) || toStr(parsed.message) || res.statusText;
+            toStr(parsed.error) ||
+            toStr(parsed.message) ||
+            res.statusText;
           throw new Error(msg);
         }
         const rawText =
@@ -683,17 +1094,21 @@ function PaymentPanel({
         throw new Error(rawText);
       }
 
-      // refresh payments list
+      // refetch payments
       const pUrl = `/api/chitgroups/${encodeURIComponent(
         gid,
-      )}/payments?memberId=${encodeURIComponent(memberId)}&all=true`;
-      const pr = await fetch(pUrl, { credentials: "include" });
-      const pj = await pr.json().catch(() => []);
+      )}/payments?memberId=${encodeURIComponent(
+        memberId,
+      )}&all=true`;
+      const pr = await fetch(pUrl, {
+        credentials: "include",
+      });
+      const pj = await pr.json().catch(() => [] as unknown);
       const arr: unknown[] = Array.isArray(pj)
         ? pj
         : isRecord(pj) && Array.isArray(pj.payments)
-        ? pj.payments
-        : [];
+          ? pj.payments
+          : [];
       setPayments(normalizeAndFilterPayments(arr));
 
       setAmount("");
@@ -712,52 +1127,100 @@ function PaymentPanel({
   }
 
   function fillFull() {
-    // set to max payable (overdue + penalty + current)
     setAmount(overdue.maxPayableIfClearNow);
     setShowQr(true);
   }
 
+  const inputsDisabled =
+    !canPayThisMonth || submitting || loading;
+
   return (
-    <div className="bg-[var(--bg-main)] p-3 rounded-md border">
-      <div className="text-sm text-gray-600 mb-2">Your due this month</div>
+    <div className="bg-[var(--bg-main)] p-1 sm:p-4 rounded-xl border space-y-3 w-70 sm:w-auto">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium text-gray-700">
+          Your due this month
+        </div>
+        {!canPayThisMonth && (
+          <div className="text-[11px] text-amber-600 text-right">
+            Auction winner not finalised for this month yet.
+            Payments will open after admin runs the auction.
+          </div>
+        )}
+      </div>
+
       <div className="flex flex-wrap items-baseline gap-4">
         <div>
-          <div className="text-xs text-gray-500">Installment</div>
+          <div className="text-xs text-gray-500">
+            Installment
+            {auctionDiscountShare > 0
+              ? " (after auction)"
+              : ""}
+          </div>
           <div className="text-lg font-semibold">
-            ₹{perMember.toLocaleString()}
+            ₹{expectedThisMonth.toLocaleString()}
           </div>
         </div>
         <div>
-          <div className="text-xs text-gray-500">Already paid</div>
-          <div className="text-lg">₹{paidThisMonth.toLocaleString()}</div>
+          <div className="text-xs text-gray-500">
+            Already paid
+          </div>
+          <div className="text-lg">
+            ₹{paidThisMonth.toLocaleString()}
+          </div>
         </div>
         <div>
-          <div className="text-xs text-gray-500">Remaining</div>
+          <div className="text-xs text-gray-500">
+            Remaining
+          </div>
           <div className="text-lg font-semibold">
             ₹{monthlyRemaining.toLocaleString()}
           </div>
         </div>
       </div>
 
-      {overdue.totalRem > 0 && (
-        <div className="mt-3 p-2 rounded bg-yellow-50 border text-sm">
-          <div className="font-medium">
-            Overdue: ₹{overdue.totalRem.toLocaleString()}
+      {(overdue.totalRem > 0 ||
+        overdue.currentMonthPenalty > 0) && (
+        <div className="mt-1 p-2 rounded-lg bg-yellow-50 border text-xs space-y-1">
+          {overdue.totalRem > 0 && (
+            <div>
+              <span className="font-medium">
+                Overdue principal:
+              </span>{" "}
+              ₹{overdue.totalRem.toLocaleString()}
+            </div>
+          )}
+          {overdue.currentMonthPenalty > 0 && (
+            <div>
+              <span className="font-medium">
+                Current month penalty (till today):
+              </span>{" "}
+              ₹
+              {overdue.currentMonthPenalty.toLocaleString()}
+            </div>
+          )}
+          <div>
+            <span className="font-medium">
+              Total penalty:
+            </span>{" "}
+            ₹{Math.round(
+              overdue.penaltyIfNow,
+            ).toLocaleString()}
           </div>
-          <div className="text-xs text-gray-600">
-            Penalty if cleared now (approx): ₹
-            {Math.round(overdue.penaltyIfNow).toLocaleString()}
-          </div>
-          <div className="text-xs text-gray-600 mt-1">
-            Max payable now (overdue + penalty + this month): ₹
-            {overdue.maxPayableIfClearNow.toLocaleString()}
+          <div>
+            <span className="font-medium">
+              Max payable now (overdue + penalty + this
+              month):
+            </span>{" "}
+            ₹{overdue.maxPayableIfClearNow.toLocaleString()}
           </div>
         </div>
       )}
 
-      <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
         <div>
-          <label className="text-xs text-gray-500">Amount to pay</label>
+          <label className="text-xs text-gray-500">
+            Amount to pay
+          </label>
           <input
             type="number"
             min={0}
@@ -775,26 +1238,33 @@ function PaymentPanel({
               setAmount(n);
             }}
             placeholder={`Max ₹${overdue.maxPayableIfClearNow}`}
-            className="w-full p-2 rounded border"
+            disabled={inputsDisabled}
+            className="w-full p-2 rounded border bg-white"
           />
         </div>
 
         <div>
-          <label className="text-xs text-gray-500">UTR / Ref (optional)</label>
+          <label className="text-xs text-gray-500">
+            UTR / Ref (optional)
+          </label>
           <input
             value={utr}
             onChange={(e) => setUtr(e.target.value)}
-            className="w-full p-2 rounded border"
+            disabled={inputsDisabled}
+            className="w-full p-2 rounded border bg-white"
             placeholder="UTR or txn ref"
           />
         </div>
 
         <div>
-          <label className="text-xs text-gray-500">Note (optional)</label>
+          <label className="text-xs text-gray-500">
+            Note (optional)
+          </label>
           <input
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            className="w-full p-2 rounded border"
+            disabled={inputsDisabled}
+            className="w-full p-2 rounded border bg-white"
             placeholder="Payment note"
           />
         </div>
@@ -807,17 +1277,23 @@ function PaymentPanel({
             type="file"
             accept="image/*,application/pdf"
             onChange={onFileChange}
+            disabled={inputsDisabled}
             className="w-full p-1"
           />
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 mt-3">
+      <div className="flex flex-wrap gap-2 mt-2 text-sm">
         <button
           type="button"
           onClick={fillFull}
-          disabled={monthlyRemaining <= 0 && overdue.totalRem <= 0}
-          className="px-3 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
+          disabled={
+            inputsDisabled ||
+            (monthlyRemaining <= 0 &&
+              overdue.totalRem <= 0 &&
+              overdue.currentMonthPenalty <= 0)
+          }
+          className="px-3 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-50"
         >
           Pay full month
         </button>
@@ -825,8 +1301,19 @@ function PaymentPanel({
         <button
           type="button"
           onClick={() => {
-            if (typeof amount !== "number" || amount <= 0) {
-              setErr("Enter valid amount to generate QR.");
+            if (!canPayThisMonth) {
+              setErr(
+                "You can generate QR after auction is completed.",
+              );
+              return;
+            }
+            if (
+              typeof amount !== "number" ||
+              amount <= 0
+            ) {
+              setErr(
+                "Enter valid amount to generate QR.",
+              );
               return;
             }
             if (!upiId) {
@@ -836,7 +1323,8 @@ function PaymentPanel({
             setErr(null);
             setShowQr((s) => !s);
           }}
-          className="px-3 py-2 bg-gray-200 rounded"
+          disabled={inputsDisabled}
+          className="px-3 py-2 rounded-lg bg-gray-200 disabled:opacity-50"
         >
           {showQr ? "Hide QR" : "Generate QR"}
         </button>
@@ -844,46 +1332,61 @@ function PaymentPanel({
         <button
           type="button"
           onClick={submitRequest}
-          disabled={submitting || typeof amount !== "number" || amount <= 0}
-          className="px-3 py-2 bg-green-600 text-white rounded"
+          disabled={
+            inputsDisabled ||
+            typeof amount !== "number" ||
+            amount <= 0
+          }
+          className="px-3 py-2 rounded-lg bg-green-600 text-white disabled:opacity-50"
         >
           {submitting ? "Submitting…" : "Submit (pending)"}
         </button>
       </div>
 
-      {showQr && amount && typeof amount === "number" && (
-        <div className="mt-3 border rounded p-3 flex flex-col sm:flex-row gap-4 items-start">
-          <div className="flex-shrink-0">
-            {qrDataUrl ? (
-              <Image src={qrDataUrl} alt="UPI QR" width={160} height={160} />
-            ) : (
-              <div className="w-[160px] h-[160px] grid place-items-center text-xs">
-                Generating QR…
+      {showQr &&
+        amount &&
+        typeof amount === "number" && (
+          <div className="mt-3 border rounded-xl p-3 flex flex-col sm:flex-row gap-4 items-start bg-white">
+            <div className="flex-shrink-0">
+              {qrDataUrl ? (
+                <Image
+                  src={qrDataUrl}
+                  alt="UPI QR"
+                  width={160}
+                  height={160}
+                />
+              ) : (
+                <div className="w-[160px] h-[160px] grid place-items-center text-xs">
+                  Generating QR…
+                </div>
+              )}
+            </div>
+            <div className="text-xs break-words">
+              <div className="font-medium">UPI ID</div>
+              <div className="mb-2">
+                {upiId || "Not configured"}
               </div>
-            )}
-          </div>
-          <div className="text-sm break-words">
-            <div className="font-medium">UPI ID</div>
-            <div className="text-xs mb-2">{upiId || "Not configured"}</div>
-            <div className="text-xs">{upiPayload}</div>
-            <div className="mt-2 text-xs text-gray-500">
-              After paying, paste UTR or upload screenshot and press Submit
-              (admin approval required). Allocation plan is sent with your
-              request for admin to apply.
+              <div>{upiPayload}</div>
+              <div className="mt-2 text-gray-500">
+                After paying, paste UTR or upload screenshot
+                and press Submit (admin approval required).
+                Allocation plan is sent with your request for
+                admin to apply.
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Month-wise table (fills the big blank area) */}
-      <div className="mt-4">
-        <div className="text-sm font-medium mb-2">
-          Payment history (month-wise)
+      <div className="mt-3">
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-sm font-medium">
+            Payment history (month-wise)
+          </div>
         </div>
-        <div className="overflow-auto bg-white rounded border">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="text-xs text-gray-500">
+        <div className="overflow-auto bg-white rounded-xl border max-h-64">
+          <table className="w-full text-left text-xs">
+            <thead className="sticky top-0 bg-gray-50">
+              <tr className="text-gray-500">
                 <th className="p-2">Month</th>
                 <th className="p-2">Principal paid</th>
                 <th className="p-2">Penalty paid</th>
@@ -899,7 +1402,9 @@ function PaymentPanel({
                   <td className="p-2">
                     {m.label}{" "}
                     {m.idx === curMonth ? (
-                      <span className="text-xs text-gray-400">(current)</span>
+                      <span className="text-[11px] text-gray-400">
+                        (current)
+                      </span>
                     ) : null}
                   </td>
                   <td className="p-2">
@@ -909,7 +1414,10 @@ function PaymentPanel({
                     ₹{Math.round(m.penalty).toLocaleString()}
                   </td>
                   <td className="p-2">
-                    ₹{Math.round(m.paid + m.penalty).toLocaleString()}
+                    ₹
+                    {Math.round(
+                      m.paid + m.penalty,
+                    ).toLocaleString()}
                   </td>
                   <td className="p-2">
                     ₹{Math.round(m.remaining).toLocaleString()}
@@ -920,24 +1428,29 @@ function PaymentPanel({
                         m.status === "Paid in full"
                           ? "font-semibold text-green-600"
                           : m.status === "Partial"
-                          ? "font-semibold text-yellow-600"
-                          : "font-semibold text-red-600"
+                            ? "font-semibold text-yellow-600"
+                            : "font-semibold text-red-600"
                       }
                     >
                       {m.status}
                     </span>
                   </td>
-                  <td className="p-2 text-xs text-gray-600">
+                  <td className="p-2 text-[11px] text-gray-600">
                     {m.details && m.details.length ? (
                       m.details.map((d, i) => (
                         <div key={`${m.idx}-${i}`}>
-                          ₹{Math.round(d.principal).toLocaleString()}
+                          ₹
+                          {Math.round(
+                            d.principal,
+                          ).toLocaleString()}
                           {d.penalty
                             ? ` • penalty ₹${Math.round(
                                 d.penalty,
                               ).toLocaleString()}`
                             : ""}
-                          {d.meta?.ref ? ` • ${d.meta.ref}` : ""}
+                          {d.meta?.ref
+                            ? ` • ${d.meta.ref}`
+                            : ""}
                           {d.meta?.date
                             ? ` • ${new Date(
                                 d.meta.date,
@@ -946,7 +1459,9 @@ function PaymentPanel({
                         </div>
                       ))
                     ) : (
-                      <div className="text-gray-400">—</div>
+                      <div className="text-gray-400">
+                        —
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -956,9 +1471,15 @@ function PaymentPanel({
         </div>
       </div>
 
-      {err && <div className="mt-2 text-sm text-red-600">{err}</div>}
+      {err && (
+        <div className="mt-1 text-xs text-red-600">
+          {err}
+        </div>
+      )}
       {loading && (
-        <div className="mt-2 text-sm text-gray-600">Loading payments…</div>
+        <div className="mt-1 text-xs text-gray-600">
+          Loading payments…
+        </div>
       )}
     </div>
   );
@@ -987,61 +1508,135 @@ export default function UserActiveFunds() {
       ? idStr(auth._id ?? auth.id ?? auth.memberId)
       : "";
 
+  const [memberFundSummaries, setMemberFundSummaries] = useState<
+    Record<string, MemberFundSummary>
+  >({});
+
+  const handleMemberSummaryChange = useCallback(
+    (summary: MemberFundSummary) => {
+      setMemberFundSummaries((prev) => {
+        const prevForGroup = prev[summary.groupId];
+        if (
+          prevForGroup &&
+          prevForGroup.totalFunds === summary.totalFunds &&
+          prevForGroup.collected === summary.collected &&
+          prevForGroup.pending === summary.pending
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [summary.groupId]: summary,
+        };
+      });
+    },
+    [],
+  );
+
   const funds = useMemo<FundView[]>(() => {
     return safeGroups.map((g) => {
       const groupRecord = isRecord(g) ? g : {};
+
       const id = toStr(groupRecord._id ?? groupRecord.id ?? "");
-      const total = toNum(
+
+      const baseTotal = toNum(
         groupRecord.totalAmount ?? groupRecord.chitValue ?? 0,
       );
-      const collected = toNum(
+      const baseCollected = toNum(
         groupRecord.collectedAmount ?? groupRecord.collected ?? 0,
       );
+
+      const override = memberFundSummaries[id];
+
+      const totalAmount = override
+        ? override.totalFunds
+        : baseTotal;
+      const collectedAmount = override
+        ? override.collected
+        : baseCollected;
+      const pendingAmount = override
+        ? override.pending
+        : Math.max(0, totalAmount - collectedAmount);
+
+      // dates + installments
+      const startDateStr = toStr(groupRecord.startDate ?? "");
+
+      const numberOfInstallmentsRaw = toNum(
+        groupRecord.numberOfInstallments ??
+          groupRecord.totalMonths ??
+          0,
+      );
+      const numberOfInstallments =
+        numberOfInstallmentsRaw > 0
+          ? numberOfInstallmentsRaw
+          : 1;
+
+      const completedInstallmentsRaw =
+        monthsElapsedSinceStart(startDateStr);
+      const completedInstallments = Math.min(
+        completedInstallmentsRaw,
+        numberOfInstallments,
+      );
+
+      const installmentProgress =
+        (completedInstallments / numberOfInstallments) * 100;
+
       return {
         id,
-        fundName: toStr(groupRecord.fundName ?? groupRecord.name ?? ""),
-        groupName: toStr(groupRecord.groupName ?? groupRecord.group ?? ""),
-        totalAmount: total,
-        collectedAmount: collected,
-        pendingAmount: Math.max(0, total - collected),
-        penaltyPercent: toNum(
-          groupRecord.penaltyPercent ?? groupRecord.penalty ?? 0,
+        fundName: toStr(
+          groupRecord.fundName ?? groupRecord.name ?? "",
         ),
-        startDate: toStr(groupRecord.startDate ?? ""),
+        groupName: toStr(
+          groupRecord.groupName ?? groupRecord.group ?? "",
+        ),
+        totalAmount,
+        collectedAmount,
+        pendingAmount,
+        penaltyPercent: toNum(
+          groupRecord.penaltyPercent ??
+            groupRecord.penalty ??
+            0,
+        ),
+        startDate: startDateStr,
         maturityDate: toStr(
-          groupRecord.maturityDate ?? groupRecord.endDate ?? "",
+          groupRecord.maturityDate ??
+            groupRecord.endDate ??
+            "",
         ),
         status: toStr(groupRecord.status ?? "Active"),
         interestRate: toNum(groupRecord.interestRate ?? 0),
-        numberOfInstallments: toNum(
-          groupRecord.numberOfInstallments ?? groupRecord.totalMonths ?? 0,
-        ),
-        completedInstallments: Math.min(
-          9999,
-          monthsElapsedSinceStart(toStr(groupRecord.startDate ?? "")),
-        ),
+        numberOfInstallments,
+        completedInstallments,
+        installmentProgress,
         raw: g,
       };
     });
-  }, [safeGroups]);
+  }, [safeGroups, memberFundSummaries]);
 
   const userFunds = useMemo<FundView[]>(() => {
     if (Array.isArray(joined) && joined.length) {
       const setJ = new Set(joined.map((x) => idStr(x)));
       return funds.filter((f) => setJ.has(f.id));
     }
-    // fallback: deduce by membership in group object
+
     return funds.filter((f) => {
       const grp = safeGroups.find((g) => {
         if (!isRecord(g)) return false;
         const gid = toStr(g._id ?? g.id ?? "");
         return gid === f.id;
       });
+
       if (!grp || !isRecord(grp)) return false;
+
       const membersRaw =
-        (grp.members as unknown) ?? grp.memberIds ?? grp.users ?? [];
+        (grp.members as unknown) ??
+        grp.memberIds ??
+        grp.users ??
+        [];
+
       const members = Array.isArray(membersRaw) ? membersRaw : [];
       if (members.length === 0) return false;
+
       return members.some((m) => {
         if (typeof m === "string") return m === authId;
         if (isRecord(m)) {
@@ -1053,45 +1648,59 @@ export default function UserActiveFunds() {
   }, [joined, funds, safeGroups, authId]);
 
   const filtered = userFunds.filter((f) =>
-    `${f.fundName} ${f.groupName}`.toLowerCase().includes(q.toLowerCase()),
+    `${f.fundName} ${f.groupName}`
+      .toLowerCase()
+      .includes(q.toLowerCase()),
   );
 
-  const totalFunds = userFunds.reduce((sum, f) => sum + f.totalAmount, 0);
+  const totalFunds = userFunds.reduce(
+    (sum, f) => sum + f.totalAmount,
+    0,
+  );
   const totalCollected = userFunds.reduce(
     (sum, f) => sum + f.collectedAmount,
     0,
   );
-  const totalPending = userFunds.reduce((sum, f) => sum + f.pendingAmount, 0);
+  const totalPending = userFunds.reduce(
+    (sum, f) => sum + f.pendingAmount,
+    0,
+  );
 
   const statusClass = (s: string) =>
     s === "Active"
       ? "bg-green-100 text-green-800"
       : s === "Completed"
-      ? "bg-blue-100 text-blue-800"
-      : "bg-gray-100 text-gray-800";
+        ? "bg-blue-100 text-blue-800"
+        : "bg-gray-100 text-gray-800";
 
   return (
-    <div className="space-y-6 p-4 bg-[var(--bg-main)] min-h-screen">
+    <div className="space-y-6 p-1 sm:p-4 bg-[var(--bg-main)] min-h-screen">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card className="shadow-lg p-4">
-          <CardContent>
-            <p className="text-sm text-gray-500">Total Funds</p>
+        <Card className="shadow-sm border">
+          <CardContent className="p-4">
+            <p className="text-sm text-gray-500">
+              Total Funds
+            </p>
             <h3 className="text-2xl font-bold">
               ₹{totalFunds.toLocaleString()}
             </h3>
           </CardContent>
         </Card>
-        <Card className="shadow-lg p-4">
-          <CardContent>
-            <p className="text-sm text-gray-500">Collected</p>
+        <Card className="shadow-sm border">
+          <CardContent className="p-4">
+            <p className="text-sm text-gray-500">
+              Collected
+            </p>
             <h3 className="text-2xl font-bold text-green-600">
               ₹{totalCollected.toLocaleString()}
             </h3>
           </CardContent>
         </Card>
-        <Card className="shadow-lg p-4">
-          <CardContent>
-            <p className="text-sm text-gray-500">Pending</p>
+        <Card className="shadow-sm border">
+          <CardContent className="p-4">
+            <p className="text-sm text-gray-500">
+              Pending
+            </p>
             <h3 className="text-2xl font-bold text-red-600">
               ₹{totalPending.toLocaleString()}
             </h3>
@@ -1105,7 +1714,7 @@ export default function UserActiveFunds() {
           placeholder="Search funds or groups..."
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          className="pl-10 h-12 rounded-lg"
+          className="pl-10 h-11 rounded-xl shadow-sm border-gray-200 bg-white"
         />
       </div>
 
@@ -1125,39 +1734,59 @@ export default function UserActiveFunds() {
                 exit={{ opacity: 0 }}
                 transition={{ delay: i * 0.03 }}
               >
-                <Card className="shadow-lg p-4">
-                  <CardContent>
-                    <div className="flex flex-col md:flex-row justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-lg font-bold">{f.fundName}</h3>
-                          <Badge className={statusClass(f.status)}>
+                <Card className="shadow-sm border overflow-hidden">
+                  <CardContent className="p-4 space-y-4">
+                    {/* top summary row */}
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <h3 className="text-lg font-semibold">
+                              {f.fundName}
+                            </h3>
+                            <p className="text-xs text-gray-500">
+                              {f.groupName}
+                            </p>
+                          </div>
+                          <Badge
+                            className={statusClass(f.status)}
+                          >
                             {f.status}
                           </Badge>
                         </div>
-                        <p className="text-sm text-gray-500">{f.groupName}</p>
 
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                           <div>
-                            <p className="text-xs text-gray-500">Total</p>
+                            <p className="text-xs text-gray-500">
+                              Total
+                            </p>
                             <p className="font-semibold">
-                              ₹{f.totalAmount.toLocaleString()}
+                              ₹
+                              {f.totalAmount.toLocaleString()}
                             </p>
                           </div>
                           <div>
-                            <p className="text-xs text-gray-500">Collected</p>
+                            <p className="text-xs text-gray-500">
+                              Collected
+                            </p>
                             <p className="font-semibold text-green-600">
-                              ₹{f.collectedAmount.toLocaleString()}
+                              ₹
+                              {f.collectedAmount.toLocaleString()}
                             </p>
                           </div>
                           <div>
-                            <p className="text-xs text-gray-500">Pending</p>
+                            <p className="text-xs text-gray-500">
+                              Pending
+                            </p>
                             <p className="font-semibold text-red-600">
-                              ₹{f.pendingAmount.toLocaleString()}
+                              ₹
+                              {f.pendingAmount.toLocaleString()}
                             </p>
                           </div>
                           <div>
-                            <p className="text-xs text-gray-500">Penalty</p>
+                            <p className="text-xs text-gray-500">
+                              Penalty
+                            </p>
                             <p className="font-semibold">
                               {f.penaltyPercent}%
                             </p>
@@ -1166,54 +1795,132 @@ export default function UserActiveFunds() {
 
                         <div className="mt-2">
                           <div className="flex justify-between text-sm">
-                            <span className="text-gray-500">Progress</span>
+                            <span className="text-gray-500">
+                              Installment progress
+                            </span>
                             <span className="font-semibold">
-                              {Math.min(
-                                (f.collectedAmount / (f.totalAmount || 1)) *
-                                  100,
-                                100,
-                              ).toFixed(1)}
+                              {f.installmentProgress.toFixed(
+                                1,
+                              )}
                               %
                             </span>
                           </div>
                           <div className="w-full h-2 bg-gray-200 rounded-full mt-1 overflow-hidden">
                             <div
                               style={{
-                                width: `${Math.min(
-                                  (f.collectedAmount / (f.totalAmount || 1)) *
-                                    100,
-                                  100,
-                                )}%`,
+                                width: `${f.installmentProgress}%`,
                               }}
-                              className="h-full bg-green-500 rounded-full transition-all"
+                              className="h-full bg-gradient-to-r from-emerald-500 to-sky-500 rounded-full transition-all"
                             />
                           </div>
                         </div>
 
-                        <div className="flex flex-wrap gap-4 mt-2 text-sm text-gray-500">
+                        <div className="flex flex-wrap gap-3 text-xs text-gray-500 mt-1">
                           <div className="flex items-center gap-1">
-                            <Calendar className="w-4 h-4" />{" "}
+                            <Calendar className="w-3 h-3" />
                             <span>
                               {f.startDate} - {f.maturityDate}
                             </span>
                           </div>
                           <div>
-                            {f.completedInstallments}/{f.numberOfInstallments}{" "}
-                            Installments
+                            {f.completedInstallments}/
+                            {f.numberOfInstallments} installments
                           </div>
                         </div>
                       </div>
+                    </div>
 
-                      <div className="w-full md:w-96 space-y-3">
-                        {isRecord(grp) ? (
-                          <BidPanel chit={grp as ChitGroup} memberId={authId} />
+                    {/* second row: bid panel + payment/summary table */}
+                    <div className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                      <div className="space-y-3">
+                        {grp && isRecord(grp) ? (
+                          (() => {
+                            const chitGroup = grp as ChitGroup;
+                            const chitId = idStr(
+                              (chitGroup as {
+                                _id?: unknown;
+                                id?: unknown;
+                              })._id ??
+                                (chitGroup as {
+                                  _id?: unknown;
+                                  id?: unknown;
+                                }).id ??
+                                chitGroup,
+                            );
+                            const start = toStr(
+                              (chitGroup as {
+                                startDate?: unknown;
+                              }).startDate ?? "",
+                            );
+                            const currentMonthIndex =
+                              monthsElapsedSinceStart(start);
+
+                            const rawBiddingOpen = (
+                              chitGroup as {
+                                biddingOpen?: unknown;
+                              }
+                            ).biddingOpen;
+                            const rawBiddingMonth = (
+                              chitGroup as {
+                                biddingMonthIndex?: unknown;
+                              }
+                            ).biddingMonthIndex;
+
+                            const biddingMonth =
+                              typeof rawBiddingMonth ===
+                                "number" &&
+                              !Number.isNaN(rawBiddingMonth)
+                                ? Math.max(
+                                    1,
+                                    Math.round(
+                                      rawBiddingMonth,
+                                    ),
+                                  )
+                                : currentMonthIndex;
+
+                            const isBiddingOpen =
+                              rawBiddingOpen === true &&
+                              biddingMonth ===
+                                currentMonthIndex;
+
+                            const chitValue = toNum(
+                              (chitGroup as {
+                                chitValue?: unknown;
+                              }).chitValue ??
+                                (chitGroup as {
+                                  totalAmount?: unknown;
+                                }).totalAmount ??
+                                0,
+                            );
+
+                            return (
+                              <BidPanel
+                                chitId={chitId}
+                                memberId={authId}
+                                chitValue={chitValue}
+                                isBiddingOpen={
+                                  isBiddingOpen
+                                }
+                                currentMonthIndex={
+                                  currentMonthIndex
+                                }
+                              />
+                            );
+                          })()
                         ) : (
                           <div className="text-sm text-gray-500">
                             Bid panel unavailable.
                           </div>
                         )}
-                        <PaymentPanel groupObj={grp ?? {}} memberId={authId} />
                       </div>
+
+                      <PaymentPanel
+                        groupObj={grp ?? {}}
+                        memberId={authId}
+                        onSummaryChange={
+                          handleMemberSummaryChange
+                        }
+                      />
                     </div>
                   </CardContent>
                 </Card>
@@ -1223,7 +1930,7 @@ export default function UserActiveFunds() {
         </AnimatePresence>
 
         {filtered.length === 0 && (
-          <div className="text-center text-gray-500 mt-4">
+          <div className="text-center text-gray-500 mt-4 text-sm">
             You have no active chit funds joined.
           </div>
         )}

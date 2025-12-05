@@ -196,10 +196,45 @@ export async function allocatePayment({
     }
   }
 
-  // now check each distinct monthIndex we modified (1-based)
+   // now check each distinct monthIndex we modified (1-based)
   const distinctMonths: number[] = Array.from(
     new Set(allocations.map((a) => (a.monthIndex ?? 0) + 1))
   );
+  for (const m of distinctMonths) {
+    try {
+      // compute total collected for chit+month
+      const agg = await Contribution.aggregate([
+        { $match: { chitId: String(groupId), monthIndex: m } },
+        { $group: { _id: null, totalCollected: { $sum: "$amount" } } },
+      ]);
+
+      const totalCollected =
+        (agg[0]?.totalCollected as number | undefined) ?? 0;
+      const groupDoc = await ChitGroup.findById(groupId).lean();
+
+      if (groupDoc && totalCollected >= Number(groupDoc.chitValue || 0)) {
+        // only run auction if not already run for this month
+        const already = await Auction.findOne({
+          chitId: String(groupId),
+          monthIndex: m,
+        });
+        if (!already) {
+          // run auction and distribute immediately
+          await runAuctionAndDistribute(String(groupId), m).catch((err) => {
+            console.error("runAuctionAndDistribute error:", err);
+          });
+        }
+      }
+    } catch (err) {
+      console.error(
+        "Error while checking/running auction for month",
+        m,
+        err
+      );
+    }
+  }
+
+
   for (const m of distinctMonths) {
     try {
       // compute total collected for chit+month

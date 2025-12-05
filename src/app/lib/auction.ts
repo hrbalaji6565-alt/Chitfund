@@ -1,182 +1,215 @@
 // src/app/lib/auction.ts
 import mongoose from "mongoose";
-import ChitGroup from "@/app/models/ChitGroup";
-import Contribution from "@/app/models/Contribution";
-import Auction from "@/app/models/Auction";
 import Bid from "@/app/models/Bid";
+import Auction from "@/app/models/Auction";
+import ChitGroup from "@/app/models/ChitGroup";
+import MemberLedger from "@/app/models/MemberLedger";
 
-type BidLean = {
-  _id?: unknown;
-  memberId?: string | mongoose.Types.ObjectId;
-  member?: string | mongoose.Types.ObjectId;
-  discountOffered?: number;
-  discount?: number;
-  bidAmount?: number;
-  [k: string]: unknown;
+type UnknownRecord = Record<string, unknown>;
+
+const ADMIN_COMMISSION_PERCENT = 4;
+
+const toNum = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
 };
 
-type ContributionLean = {
-  _id?: unknown;
-  memberId?: string | mongoose.Types.ObjectId;
-  amount?: number;
-  [k: string]: unknown;
-};
+const idStr = (v: unknown): string =>
+  v === undefined || v === null ? "" : String(v);
 
 /**
- * Run auction for chitId + monthIndex if not already run.
- * - selects winner (highest discount) among eligible bidders (not already in chit.winners)
- * - computes winningPayout = totalPot - winningDiscount
- * - distributes winningDiscount pro-rata to contributors of that month
- * - writes Auction doc and updates chit.winners
+ * Admin page ka same logic: monthly total + per-member installment.
+ */
+function computePotMeta(group: UnknownRecord): {
+  expectedMonthlyTotal: number;
+  perMemberInstallment: number;
+  totalMembers: number;
+} {
+  const totalMembers = toNum(
+    group.totalMembers ??
+      (Array.isArray(group.members) ? group.members.length : 0)
+  );
+  const monthlyFromModel = toNum(group.monthlyInstallment);
+  const chitValue = toNum(group.chitValue);
+  const totalMonths = toNum(group.totalMonths);
+
+  let expectedMonthlyTotal = 0;
+
+  if (monthlyFromModel > 0 && totalMembers > 0) {
+    expectedMonthlyTotal = monthlyFromModel * totalMembers;
+  } else if (chitValue > 0 && totalMonths > 0) {
+    expectedMonthlyTotal = Math.round(
+      chitValue / Math.max(1, totalMonths || 1)
+    );
+  } else {
+    expectedMonthlyTotal =
+      monthlyFromModel * Math.max(1, totalMembers || 1) || chitValue || 0;
+  }
+
+  const perMemberInstallment =
+    monthlyFromModel > 0
+      ? Math.round(monthlyFromModel)
+      : totalMembers > 0
+      ? Math.round(expectedMonthlyTotal / totalMembers)
+      : 0;
+
+  return {
+    expectedMonthlyTotal,
+    perMemberInstallment,
+    totalMembers: Math.max(1, totalMembers || 1),
+  };
+}
+
+/**
+ * Auction run karega, winner pick karega (max discount),
+ * 4% admin commission, baaki payout + discount distribution.
+ *
+ * monthIndex = 1-based (Month #1, #2, ...)
  */
 export async function runAuctionAndDistribute(
   chitId: string,
   monthIndex: number
 ) {
-  // find chit
-  const chit = await ChitGroup.findById(chitId);
-  if (!chit) throw new Error("Chit not found");
-
-  // avoid duplicate auctions for same chit/month
-  const existing = await Auction.findOne({
-    chitId: String(chit._id),
-    monthIndex,
-  });
-  if (existing) {
-    return existing;
+  if (!mongoose.Types.ObjectId.isValid(chitId)) {
+    throw new Error("Invalid chit id");
   }
 
-  const totalPot = Number(chit.chitValue || 0);
+  const mIdx = Math.max(1, Math.round(monthIndex || 1));
 
-  // load bids (unsorted) and compute a numeric `discount` for each so we are robust
-  // to different Bid schema shapes: discountOffered, discount, or bidAmount.
-  const rawBids = (await Bid.find({
-    chitId: String(chit._id),
-    monthIndex,
-  }).lean()) as BidLean[];
-
-  const bidsWithDiscount = rawBids
-    .map((b: BidLean) => {
-      // priority: b.discountOffered -> b.discount -> compute from bidAmount if present
-      const discountOffered = (() => {
-        if (!b) return 0;
-        if (typeof b.discountOffered === "number")
-          return Number(b.discountOffered);
-        if (typeof b.discount === "number") return Number(b.discount);
-        if (
-          typeof b.bidAmount === "number" &&
-          typeof totalPot === "number"
-        ) {
-          return Math.max(0, Number(totalPot) - Number(b.bidAmount));
-        }
-        // fallback
-        return 0;
-      })();
-
-      return {
-        ...b,
-        __computedDiscount: discountOffered,
-      } as BidLean & { __computedDiscount: number };
-    })
-    // sort by computed discount desc (highest discount first)
-    .sort(
-      (a, z) =>
-        Number(z.__computedDiscount || 0) -
-        Number(a.__computedDiscount || 0)
-    );
-
-  // normalize chit.winners (could be ObjectId[] or string[])
-  const rawWinners = (chit.get("winners") as unknown) ?? [];
-  const alreadyWon: string[] = Array.isArray(rawWinners)
-    ? (rawWinners as unknown[]).map((w) => String(w))
-    : [];
-
-  // pick first eligible bid (not already winner)
-  let winnerId: string | null = null;
-  let winningDiscount = 0;
-
-  for (const b of bidsWithDiscount) {
-    const bidderRaw =
-      b.memberId ??
-      (typeof b.member === "string" || b.member instanceof mongoose.Types.ObjectId
-        ? b.member
-        : undefined);
-    const bidderId = bidderRaw ? String(bidderRaw) : "";
-    const discount = Number((b as { __computedDiscount: number }).__computedDiscount || 0);
-    if (bidderId && !alreadyWon.includes(bidderId)) {
-      winnerId = bidderId;
-      winningDiscount = discount;
-      break;
-    }
+  const groupDoc = await ChitGroup.findById(chitId).lean();
+  if (!groupDoc) {
+    throw new Error("Chit group not found");
   }
 
-  // If no eligible bids: default discount 0 => winnerId stays null
-  const winningPayout = Math.max(0, totalPot - winningDiscount);
+  const groupRec = groupDoc as unknown as UnknownRecord;
+  const { expectedMonthlyTotal, perMemberInstallment, totalMembers } =
+    computePotMeta(groupRec);
 
-  // collect contributions for the month
-  const contributions = (await Contribution.find({
-    chitId: String(chit._id),
-    monthIndex,
-  }).lean()) as ContributionLean[];
+  // Current month bids (discountOffered = discount)
+  const bids = await Bid.find({
+    chitId,
+    monthIndex: mIdx,
+  })
+    .sort({ discountOffered: -1, createdAt: 1 }) // max discount wins
+    .lean();
 
-  const totalCollected = contributions.reduce((s, c) => {
-    const amt = typeof c.amount === "number" ? c.amount : 0;
-    return s + amt;
-  }, 0);
+  if (!bids.length) {
+    throw new Error("No bids placed for this month");
+  }
 
-  // distribute winningDiscount pro-rata among contributors for that month
+  const best = bids[0] as unknown as UnknownRecord;
+  const winningMemberId = idStr(best.memberId);
+  const winningDiscount = Math.max(0, toNum(best.discountOffered));
+
+  // Discount 0 se pot tak hi
+  const cappedDiscount = Math.min(winningDiscount, expectedMonthlyTotal);
+
+  // 4% admin commission chitValue par
+  const chitValue = toNum(groupRec.chitValue ?? expectedMonthlyTotal);
+  const adminCommission = Math.round(
+    (chitValue * ADMIN_COMMISSION_PERCENT) / 100
+  );
+
+  const winningPayout = Math.max(
+    0,
+    expectedMonthlyTotal - cappedDiscount - adminCommission
+  );
+
+  // Discount ko sab members mein equally baantna
+  const perMemberDiscountRaw =
+    totalMembers > 0 ? cappedDiscount / totalMembers : 0;
+  const perMemberDiscount = Math.round(perMemberDiscountRaw);
+
   const distributedToMembers: Array<{ memberId: string; amount: number }> = [];
 
-  if (totalCollected > 0 && winningDiscount > 0) {
-    const byMember = new Map<string, number>();
-    for (const c of contributions) {
-      const midRaw = c.memberId;
-      const mid = midRaw ? String(midRaw) : "";
+  if (Array.isArray(groupRec.members) && groupRec.members.length > 0) {
+    const membersArr = groupRec.members as unknown[];
+
+    for (const m of membersArr) {
+      let mid = "";
+
+      if (typeof m === "string") {
+        mid = m;
+      } else if (typeof m === "object" && m !== null) {
+        const obj = m as UnknownRecord;
+        mid = idStr(obj._id ?? obj.id);
+      }
+
       if (!mid) continue;
-      const amt = typeof c.amount === "number" ? c.amount : 0;
-      byMember.set(mid, (byMember.get(mid) || 0) + amt);
-    }
 
-    for (const [mid, paid] of byMember.entries()) {
-      const share = Math.round((paid / totalCollected) * winningDiscount);
-      if (share > 0) distributedToMembers.push({ memberId: mid, amount: share });
-    }
-
-    // fix rounding diff
-    const distributedSum = distributedToMembers.reduce(
-      (s, x) => s + x.amount,
-      0
-    );
-    const diff = winningDiscount - distributedSum;
-    if (diff !== 0 && distributedToMembers.length) {
-      distributedToMembers[0].amount += diff;
+      distributedToMembers.push({
+        memberId: mid,
+        amount: perMemberDiscount,
+      });
     }
   }
 
-  // Create auction record
-  const auction = await Auction.create({
-    chitId: String(chit._id),
-    monthIndex,
-    totalPot,
-    winningMemberId: winnerId ?? "NO_WINNER",
-    winningBidAmount: winningDiscount,
-    winningPayout,
-    distributedToMembers,
+  // Agar members array nahi mili, to count ke basis par dummy ids (safety only)
+  if (!distributedToMembers.length) {
+    for (let i = 0; i < totalMembers; i += 1) {
+      distributedToMembers.push({
+        memberId: `M${i + 1}`,
+        amount: perMemberDiscount,
+      });
+    }
+  }
+
+  const totalPot = expectedMonthlyTotal;
+
+  const existing = await Auction.findOne({
+    chitId,
+    monthIndex: mIdx,
   });
 
-  // mark winner as having won (so they won't bid next months)
-  if (winnerId) {
-    // normalize winners array, append if missing, and save
-    const winnersArr = Array.isArray(chit.winners)
-      ? (chit.winners as unknown[]).map((w) => String(w))
-      : [];
-    if (!winnersArr.includes(winnerId)) {
-      winnersArr.push(winnerId);
-      // assign back (string[] is fine for Mongo)
-      chit.set("winners", winnersArr);
-      await chit.save();
-    }
+  if (existing) {
+    existing.totalPot = totalPot;
+    existing.winningMemberId = winningMemberId;
+    existing.winningBidAmount = cappedDiscount;
+    existing.winningPayout = winningPayout;
+    existing.distributedToMembers = distributedToMembers;
+    await existing.save();
+  } else {
+    await Auction.create({
+      chitId,
+      monthIndex: mIdx,
+      totalPot,
+      winningMemberId,
+      winningBidAmount: cappedDiscount,
+      winningPayout,
+      distributedToMembers,
+    });
   }
 
-  return auction;
+  // MemberLedger update:
+  // New per-member due = monthlyInstallment - perMemberDiscount
+  const newPerMemberDue = Math.max(
+    0,
+    perMemberInstallment - perMemberDiscount
+  );
+
+  // Ledger ka monthIndex 0-based hai
+  const ledgerMonthIdx = mIdx - 1;
+
+  await MemberLedger.updateMany(
+    { groupId: chitId, monthIndex: ledgerMonthIdx },
+    {
+      $set: {
+        dueAmount: newPerMemberDue,
+      },
+    }
+  ).catch(() => {
+    // ignore failures
+  });
+
+  return {
+    chitId,
+    monthIndex: mIdx,
+    winningMemberId,
+    winningDiscount: cappedDiscount,
+    winningPayout,
+    perMemberInstallment,
+    perMemberDiscount,
+    adminCommission,
+    distributedToMembers,
+  };
 }

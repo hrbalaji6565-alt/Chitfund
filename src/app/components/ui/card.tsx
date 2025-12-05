@@ -65,7 +65,7 @@ export function CardContent({ className, ...props }: ComponentProps<'div'>) {
   return (
     <div
       data-slot="card-content"
-      className={clsx('px-6', className)}
+      className={clsx('px-2 sm:px-6', className)}
       {...props}
     />
   );

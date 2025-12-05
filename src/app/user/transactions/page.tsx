@@ -349,12 +349,13 @@ export default function UserTransactions() {
     return undefined;
   }
 
-  const load = useCallback(async () => {
+   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     setTxs([]);
     setDebug(null);
 
+    // current snapshot se local copy
     let localGroupMap = { ...groupMap };
 
     try {
@@ -614,7 +615,7 @@ export default function UserTransactions() {
     } finally {
       setLoading(false);
     }
-  }, [authMember, groupMap]);
+  }, [authMember]);
 
   useEffect(() => {
     void load();
@@ -815,9 +816,7 @@ export default function UserTransactions() {
         )}
       </div>
 
-      {debug && (
-        <div className="text-xs text-gray-500">{debug}</div>
-      )}
+      
     </div>
   );
 }
