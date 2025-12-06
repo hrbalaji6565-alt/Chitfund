@@ -11,24 +11,39 @@ export async function GET(req: NextRequest) {
     const groupId = url.searchParams.get("groupId") ?? undefined;
     const memberId = url.searchParams.get("memberId") ?? undefined;
 
-    const q: Record<string, string | undefined> = { status: "pending" };
+    // ⭐ NEW: allow status=all, default pending
+    const statusParam = url.searchParams.get("status") ?? "pending";
+
+    const q: Record<string, unknown> = {};
+    if (statusParam !== "all") {
+      q.status = statusParam;
+    }
     if (groupId) q.groupId = groupId;
     if (memberId) q.memberId = memberId;
 
     // newest first
     const payments = await Payment.find(q).sort({ createdAt: -1 }).lean();
 
-    // ensure each payment has memberName (if not, try to fill from embedded member)
     const normalized = payments.map((p: Record<string, unknown>) => ({
       ...p,
-      memberName: p.memberName ?? (p.member && (p.member as Record<string, unknown>).name) ?? undefined,
-      allocationSummary: (p.rawMeta as Record<string, unknown>)?.allocationSummary ?? (p as Record<string, unknown>).appliedAllocation ?? undefined,
+      memberName:
+        p.memberName ??
+        (p.member && (p.member as Record<string, unknown>).name) ??
+        undefined,
+      allocationSummary:
+        (p.rawMeta as Record<string, unknown>)?.allocationSummary ??
+        (p as Record<string, unknown>).appliedAllocation ??
+        undefined,
     }));
 
     return NextResponse.json({ success: true, payments: normalized });
   } catch (err) {
+    // eslint-disable-next-line no-console
     console.error("GET /api/admin/transactions error:", err);
-    return NextResponse.json({ success: false, error: (err as Error).message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: (err as Error).message },
+      { status: 500 },
+    );
   }
 }
 

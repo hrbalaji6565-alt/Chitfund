@@ -8,8 +8,11 @@ import {
   LogOut,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-
+import { usePathname, useRouter } from "next/navigation";
+import { logoutMember } from "@/store/memberAuthSlice";
+import type { AppDispatch } from "@/store/store";
+import { useDispatch } from "react-redux";
+import toast from "react-hot-toast";
 const Sidebar: React.FC = () => {
   const pathname = usePathname();
 
@@ -22,10 +25,24 @@ const Sidebar: React.FC = () => {
 
   const links = [
     { href: "/collection", label: "Collection Dashboard", icon: <LayoutDashboard size={16} /> },
-    { href: "/collection/Profile", label: "Profile", icon: <Users size={16} /> },
     { href: "/collection/Collection", label: "Collection", icon: <FileText size={16} /> },
   ];
-
+  const router = useRouter();
+const dispatch = useDispatch<AppDispatch>();
+  const handleLogout = async () => {
+      try {
+        await dispatch(logoutMember()).unwrap();
+      } catch {
+        // continue cleaning client state even if logout request failed
+      }
+      try {
+        localStorage.removeItem("member");
+        localStorage.removeItem("collectionUser");
+      } catch {}
+      toast.success("Logged out successfully!");
+      // go to unified auth page (root). middleware will prevent /user access afterward.
+      router.replace("/");
+    };
   return (
     <aside className="hidden lg:flex flex-col justify-between w-64 bg-[var(--bg-card)] border-r border-[var(--border-color)] min-h-screen fixed left-0 top-0">
       <nav className="py-6 px-4 flex flex-col justify-between h-full mt-12">
@@ -43,7 +60,7 @@ const Sidebar: React.FC = () => {
         </div>
 
         <div>
-          <button className="flex items-center gap-2 px-3 py-2 w-full text-[var(--color-primary)] hover:bg-[var(--bg-highlight)] rounded-md transition-all duration-200">
+          <button onClick={() => handleLogout()} className="flex items-center gap-2 px-3 py-2 w-full text-[var(--color-primary)] hover:bg-[var(--bg-highlight)] rounded-md transition-all duration-200">
             <LogOut size={16} />
             Logout
           </button>

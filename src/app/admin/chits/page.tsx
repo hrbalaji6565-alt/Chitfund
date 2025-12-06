@@ -683,7 +683,7 @@ function AdminChitsPage() {
         }
          if (!winningDiscount && winningBidAmount > 0 && baseExpectedMonthlyTotal > 0) {
           const diff =
-            winningBidAmount - baseExpectedMonthlyTotal - adminCommissionAmount;
+            winningBidAmount ;
           winningDiscount = diff > 0 ? diff : 0;
         }
         if (!winningBidAmount && baseExpectedMonthlyTotal > 0) {

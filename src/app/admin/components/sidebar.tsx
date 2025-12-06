@@ -10,16 +10,20 @@ import {
   Settings,
   Menu,
   LogOut,
+  ListCollapseIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-
+import type { AppDispatch } from "@/store/store";
+import { useDispatch } from "react-redux";
+import { toast } from "react-hot-toast";
+import { logoutMember } from "@/store/memberAuthSlice";
 const Sidebar: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const sidebarRef = useRef<HTMLDivElement | null>(null);
   const pathname = usePathname();
-
+  const router = useRouter();
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
@@ -39,7 +43,22 @@ const Sidebar: React.FC = () => {
       ? "bg-[var(--btn-primary-bg)] text-[var(--text-light)] shadow-md"
       : "text-[var(--text-secondary)] hover:text-[var(--color-primary)] hover:bg-[var(--bg-highlight)]"
   }`;
-
+  
+    const dispatch = useDispatch<AppDispatch>();
+      const handleLogout = async () => {
+          try {
+            await dispatch(logoutMember()).unwrap();
+          } catch {
+            // continue cleaning client state even if logout request failed
+          }
+          try {
+            localStorage.removeItem("member");
+            localStorage.removeItem("adminToken");
+          } catch {}
+          toast.success("Logged out successfully!");
+          // go to unified auth page (root). middleware will prevent /user access afterward.
+          router.replace("/");
+        };
 
   const links = [
     { href: "/admin", label: "Dashboard", icon: <LayoutDashboard size={16} /> },
@@ -47,11 +66,12 @@ const Sidebar: React.FC = () => {
     { href: "/admin/members", label: "Members", icon: <Users size={16} /> },
     { href: "/admin/chits", label: "Chit Plans", icon: <Wallet size={16} /> },
     { href: "/admin/transactions", label: "Transactions", icon: <FileText size={16} /> },
-    { href: "/admin/collection", label: "Collection", icon: <FileText size={16} /> },
+    { href: "/admin/collection", label: "Collection", icon: <ListCollapseIcon size={16} /> },
+    { href: "/admin/collection-user", label: "Collection User", icon: <FileText size={16} /> },
     { href: "/admin/invoice", label: "Invoices", icon: <FileText size={16} /> },
     { href: "/admin/reports", label: "Reports", icon: <BarChart2 size={16} /> },
   ];
-
+  
   const SidebarContent = () => (
     <nav className="py-6 px-4 flex flex-col justify-between h-full mt-0 md:mt-12">
       <div>

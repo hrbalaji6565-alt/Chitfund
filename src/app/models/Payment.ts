@@ -14,7 +14,7 @@ export interface IPayment extends Document {
   memberId: mongoose.Types.ObjectId | string;
   groupId: mongoose.Types.ObjectId | string;
   amount: number;
-  type: PaymentType;
+  type: PaymentType,
   reference?: string; // txn id / collector note / UTR
   collectorId?: mongoose.Types.ObjectId | string;
   allocated?: Array<{
@@ -41,7 +41,11 @@ const PaymentSchema = new Schema<IPayment>(
     memberId: { type: Schema.Types.ObjectId, ref: "Member", required: true },
     groupId: { type: Schema.Types.ObjectId, ref: "ChitGroup", required: true },
     amount: { type: Number, required: true },
-    type: { type: String, enum: ["UPI", "CASH", "BANK", "OTHER"], default: "UPI" },
+    type: {
+      type: String,
+      enum: ["UPI", "CASH", "BANK", "OTHER"],
+      default: "UPI",
+    },
     reference: { type: String },
     collectorId: { type: Schema.Types.ObjectId, ref: "Admin" },
     allocated: [
@@ -53,14 +57,19 @@ const PaymentSchema = new Schema<IPayment>(
       },
     ],
     rawMeta: { type: Schema.Types.Mixed },
-    status: { type: String, enum: ["pending", "approved", "rejected"], default: "pending" },
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+    },
     approvedAt: { type: Date, default: null },
     utr: { type: String },
     adminNote: { type: String, default: "" },
     verified: { type: Boolean, default: false },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
+
 
 /**
  * Model export

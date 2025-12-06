@@ -13,9 +13,28 @@ import {
 } from "@/app/components/ui/dropdownMenu";
 import { Avatar, AvatarFallback } from "@/app/components/ui/avtar";
 import { useRouter } from "next/navigation";
+import { logoutMember } from "@/store/memberAuthSlice";
+import toast from "react-hot-toast";
+import type { AppDispatch } from "@/store/store";
+import { useDispatch } from "react-redux";
 
 export default function Topbar() {
   const router = useRouter();
+  const dispatch = useDispatch<AppDispatch>();
+  const handleLogout = async () => {
+      try {
+        await dispatch(logoutMember()).unwrap();
+      } catch {
+        // continue cleaning client state even if logout request failed
+      }
+      try {
+        localStorage.removeItem("member");
+        localStorage.removeItem("collectionUser");
+      } catch {}
+      toast.success("Logged out successfully!");
+      // go to unified auth page (root). middleware will prevent /user access afterward.
+      router.replace("/");
+    };
   return (
     <header className="w-full sticky top-0 z-50 bg-[var(--bg-main)] border-b border-[var(--border-color)] shadow-sm">
       <div className="flex flex-wrap items-center justify-between px-6 py-3">
@@ -78,7 +97,7 @@ export default function Topbar() {
           <DropdownMenuItem
             className="hover:bg-[var(--bg-highlight)]"
             onClick={() => {
-              router.push('/');
+              handleLogout();
             }}
           >
             <LogOut className="mr-2 h-4 w-4 text-[var(--text-secondary)]" />

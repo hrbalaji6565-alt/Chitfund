@@ -41,8 +41,10 @@ type PendingPayment = {
   allocationSummary?: unknown;
   allocationDetails?: AllocationDetail[];
   verified?: boolean;
+  status?: string | null;   // ⭐ NEW
   _source?: string;
 };
+
 
 type FetchJsonResult = { ok: boolean; status: number; body: unknown };
 
@@ -246,12 +248,27 @@ const computeInvoiceDetails = (p: PendingPayment): InvoiceDetails => {
     }
   }
 
+  const statusLower = (p.status ?? "").toLowerCase();
+  const isApproved = statusLower === "approved" || p.verified === true;
+
+  // ⭐ Agar approved hai, default remaining 0
   if (!remainingAmount) {
-    remainingAmount = p.verified ? 0 : p.amount;
+    remainingAmount = isApproved ? 0 : p.amount;
   }
 
   const totalPayable = p.amount + penaltyAmount;
-  const statusLabel = p.verified ? "Approved" : "Pending Verification";
+
+  // ⭐ Status label bhi status field + verified se banao
+  let statusLabel: string;
+  if (isApproved) {
+    statusLabel = "Approved";
+  } else if (statusLower === "rejected") {
+    statusLabel = "Rejected";
+  } else if (statusLower === "pending") {
+    statusLabel = "Pending Verification";
+  } else {
+    statusLabel = statusLower || "Pending Verification";
+  }
 
   return {
     installmentMonth,
@@ -261,6 +278,7 @@ const computeInvoiceDetails = (p: PendingPayment): InvoiceDetails => {
     statusLabel,
   };
 };
+
 
 // ---------- PDF + Share helpers ----------
 
@@ -492,87 +510,99 @@ export default function AdminInvoicesPage(): React.ReactElement {
   }
 
   function normalizePayment(
-    raw: unknown,
-    fallbackGroupId?: string,
-    fallbackGroupName?: string,
-    src?: string
-  ): PendingPayment {
-    const r: UnknownRecord = isRecord(raw) ? raw : {};
+  raw: unknown,
+  fallbackGroupId?: string,
+  fallbackGroupName?: string,
+  src?: string
+): PendingPayment {
+  const r: UnknownRecord = isRecord(raw) ? raw : {};
 
-    const memberFromMeta = isRecord(r.member) ? r.member : undefined;
-    const groupFromMeta = isRecord(r.group) ? r.group : undefined;
-    const rawMeta = isRecord(r.rawMeta) ? r.rawMeta : undefined;
+  const memberFromMeta = isRecord(r.member) ? r.member : undefined;
+  const groupFromMeta = isRecord(r.group) ? r.group : undefined;
+  const rawMeta = isRecord(r.rawMeta) ? r.rawMeta : undefined;
 
-    const memberId = asOptString(
-      r.memberId ?? (memberFromMeta ? memberFromMeta._id : undefined) ?? r.userId
-    );
-    const memberName = asOptString(
-      r.memberName ?? (memberFromMeta ? memberFromMeta.name : undefined) ?? r.name
-    );
-    const groupId = asOptString(
-      r.groupId ?? (groupFromMeta ? groupFromMeta._id : undefined) ?? fallbackGroupId
-    );
-    const groupName = asOptString(
-      r.groupName ??
-        (groupFromMeta ? groupFromMeta.name : undefined) ??
-        fallbackGroupName
-    );
-    const amount = Number(r.amount ?? r.amt ?? 0) || 0;
-    const createdAt = asOptString(r.createdAt ?? r.date);
+  const memberId = asOptString(
+    r.memberId ?? (memberFromMeta ? memberFromMeta._id : undefined) ?? r.userId
+  );
+  const memberName = asOptString(
+    r.memberName ?? (memberFromMeta ? memberFromMeta.name : undefined) ?? r.name
+  );
+  const groupId = asOptString(
+    r.groupId ?? (groupFromMeta ? groupFromMeta._id : undefined) ?? fallbackGroupId
+  );
+  const groupName = asOptString(
+    r.groupName ??
+      (groupFromMeta ? groupFromMeta.name : undefined) ??
+      fallbackGroupName
+  );
+  const amount = Number(r.amount ?? r.amt ?? 0) || 0;
+  const createdAt = asOptString(r.createdAt ?? r.date);
 
-    const allocationSummary: unknown =
-      (rawMeta && rawMeta.allocationSummary !== undefined
-        ? rawMeta.allocationSummary
-        : undefined) ??
-      (rawMeta && rawMeta.appliedAllocation !== undefined
-        ? rawMeta.appliedAllocation
-        : undefined) ??
-      (rawMeta && rawMeta.allocation !== undefined ? rawMeta.allocation : undefined) ??
-      r.allocationSummary ??
-      r.allocation ??
-      undefined;
-    const allocationDetails = parseAllocationsFromRecord(r);
+  // ⭐ NEW: status read karo
+  const status = asOptString(r.status ?? r.state);
 
-    const utrValue =
-      r.utr !== undefined
-        ? r.utr
-        : r.txnId !== undefined
-        ? r.txnId
-        : r.reference !== undefined
-        ? r.reference
-        : undefined;
-    const noteValue =
-      r.note !== undefined
-        ? r.note
-        : r.adminNote !== undefined
-        ? r.adminNote
-        : undefined;
-    const fileValue =
-      r.fileUrl !== undefined
-        ? r.fileUrl
-        : r.attachment !== undefined
-        ? r.attachment
-        : undefined;
+  const allocationSummary: unknown =
+    (rawMeta && rawMeta.allocationSummary !== undefined
+      ? rawMeta.allocationSummary
+      : undefined) ??
+    (rawMeta && rawMeta.appliedAllocation !== undefined
+      ? rawMeta.appliedAllocation
+      : undefined) ??
+    (rawMeta && rawMeta.allocation !== undefined
+      ? rawMeta.allocation
+      : undefined) ??
+    r.allocationSummary ??
+    r.allocation ??
+    undefined;
+  const allocationDetails = parseAllocationsFromRecord(r);
 
-    const verified = Boolean(r.verified ?? false);
+  const utrValue =
+    r.utr !== undefined
+      ? r.utr
+      : r.txnId !== undefined
+      ? r.txnId
+      : r.reference !== undefined
+      ? r.reference
+      : undefined;
+  const noteValue =
+    r.note !== undefined
+      ? r.note
+      : r.adminNote !== undefined
+      ? r.adminNote
+      : undefined;
+  const fileValue =
+    r.fileUrl !== undefined
+      ? r.fileUrl
+      : r.attachment !== undefined
+      ? r.attachment
+      : undefined;
 
-    return {
-      _id: asOptString(r._id ?? r.id ?? Math.random().toString(36).slice(2)) ?? "",
-      memberId: memberId ?? null,
-      memberName: memberName ?? null,
-      groupId: groupId ?? null,
-      groupName: groupName ?? null,
-      amount,
-      utr: asOptString(utrValue) ?? null,
-      note: asOptString(noteValue) ?? null,
-      fileUrl: asOptString(fileValue) ?? null,
-      createdAt,
-      allocationSummary,
-      allocationDetails,
-      verified,
-      _source: src,
-    };
-  }
+  // ⭐ IMPORTANT: yahan fix – approved status ko verified मानो
+  const statusLower = (status ?? "").toLowerCase();
+  const verified =
+    statusLower === "approved" ||
+    Boolean(r.verified ?? false) ||
+    Boolean(r.approvedAt ?? false);
+
+  return {
+    _id: asOptString(r._id ?? r.id ?? Math.random().toString(36).slice(2)) ?? "",
+    memberId: memberId ?? null,
+    memberName: memberName ?? null,
+    groupId: groupId ?? null,
+    groupName: groupName ?? null,
+    amount,
+    utr: asOptString(utrValue) ?? null,
+    note: asOptString(noteValue) ?? null,
+    fileUrl: asOptString(fileValue) ?? null,
+    createdAt,
+    allocationSummary,
+    allocationDetails,
+    verified,
+    status: status ?? null,       // ⭐ store bhi kar rahe
+    _source: src,
+  };
+}
+
 
   async function load() {
     setLoading(true);

@@ -8,8 +8,7 @@ import { AppDispatch, RootState } from "@/store/store";
 import { loginAdmin } from "@/store/adminSlice";
 import { loginMember, hydrateMember } from "@/store/memberAuthSlice";
 import Button from "../ui/button";
-import { Toaster } from "react-hot-toast";
-import type { Member as MemberType } from "@/app/lib/types"; // use project's Member type
+import type { Member as MemberType } from "@/app/lib/types";
 
 // Local shapes for thunk results
 interface AdminLoginResult {
@@ -21,17 +20,45 @@ interface MemberLoginResult {
   member?: MemberType;
 }
 
+interface CollectionUser {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  role: "collector" | "admin";
+  active: boolean;
+  assignedGroupIds?: string[];
+}
+
+interface CollectionLoginResponse {
+  success: boolean;
+  user?: CollectionUser;
+  token?: string;
+  error?: string;
+}
+
+type LoginType = "admin" | "user" | "collector";
+
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
   const [formData, setFormData] = useState({ email: "", password: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loginType, setLoginType] = useState<LoginType>("user");
+  const [collectionError, setCollectionError] = useState<string | null>(null);
 
   const dispatch = useDispatch<AppDispatch>();
   const router = useRouter();
 
-  const { loading: adminLoading, error: adminError, token: adminToken } = useSelector((state: RootState) => state.admin);
-  const { loading: memberLoading, error: memberError, token: memberToken } = useSelector((state: RootState) => state.auth);
+  const { loading: adminLoading, error: adminError, token: adminToken } = useSelector(
+    (state: RootState) => state.admin,
+  );
+  const {
+    loading: memberLoading,
+    error: memberError,
+    token: memberToken,
+  } = useSelector((state: RootState) => state.auth);
 
+  // Existing redirects (admin / user)
   useEffect(() => {
     if (adminToken) {
       try {
@@ -56,48 +83,55 @@ export default function AuthPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setCollectionError(null);
+
     if (!formData.email || !formData.password) return;
 
     setIsSubmitting(true);
 
-    // 1) Try admin login first
     try {
-      const adminResult = (await dispatch(loginAdmin({ email: formData.email, password: formData.password }))) as {
-        payload?: AdminLoginResult;
-      };
-      if (adminResult?.payload?.token) {
-        try { localStorage.setItem("adminToken", adminResult.payload.token); } catch {}
-        router.replace("/admin");
+      if (loginType === "admin") {
+        // 🔹 ADMIN LOGIN ONLY
+        const adminResult = (await dispatch(
+          loginAdmin({ email: formData.email, password: formData.password }),
+        )) as { payload?: AdminLoginResult };
+
+        if (adminResult?.payload?.token) {
+          try {
+            localStorage.setItem("adminToken", adminResult.payload.token);
+          } catch {}
+          router.replace("/admin");
+        }
         return;
       }
-    } catch (error: unknown) {
-      // admin login failed — proceed to member
-    }
 
-    // 2) Member login
-    try {
-      const memberResult = (await dispatch(loginMember({ email: formData.email, password: formData.password }))) as {
-        payload?: MemberLoginResult;
-      };
+      if (loginType === "user") {
+        // 🔹 USER LOGIN ONLY
+        const memberResult = (await dispatch(
+          loginMember({ email: formData.email, password: formData.password }),
+        )) as { payload?: MemberLoginResult };
 
-      // memberResult should be { member, token? } per thunk
-      try {
         const token = memberResult?.payload?.token ?? null;
-        if (token) localStorage.setItem("memberToken", token);
+        if (token) {
+          try {
+            localStorage.setItem("memberToken", token);
+          } catch {}
+        }
 
-        // ensure lightweight member saved in localStorage in consistent shape
         if (memberResult?.payload?.member) {
           const m = memberResult.payload.member;
 
-          // Build a lightweight store object that matches what other parts of the app expect in localStorage.
           const storeObj: Partial<MemberType> = {
             id: (m.id ?? m._id) ?? "",
             name: m.name ?? "",
             email: m.email ?? "",
-            // preserve optional fields when present
-            mobile: (m as Partial<MemberType>).mobile ?? (m as Partial<MemberType>).mobile,
-            status: (m as Partial<MemberType>).status ?? (m as Partial<MemberType>).status,
-            role: m.role ?? (Array.isArray((m as Partial<MemberType>).roles) ? (m as Partial<MemberType>).roles?.[0] : "user"),
+            mobile: (m as Partial<MemberType>).mobile,
+            status: (m as Partial<MemberType>).status,
+            role:
+              m.role ??
+              (Array.isArray((m as Partial<MemberType>).roles)
+                ? (m as Partial<MemberType>).roles?.[0]
+                : "user"),
             avatarUrl: m.avatarUrl ?? (m as Partial<MemberType>).photo ?? undefined,
             _id: m._id,
             roles: m.roles,
@@ -108,28 +142,63 @@ export default function AuthPage() {
             localStorage.setItem("member", JSON.stringify(storeObj));
           } catch {}
 
-          // hydrate redux with a properly typed Member (no `any`)
           dispatch(hydrateMember(m as MemberType));
+          router.replace("/user");
         }
-      } catch {}
+        return;
+      }
 
-      router.replace("/user");
-      return;
-    } catch (error: unknown) {
-      console.warn("Login failed for member:", error);
+      if (loginType === "collector") {
+        // 🔹 COLLECTION LOGIN ONLY
+        const response = await fetch("/api/collections/login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: formData.email,
+            password: formData.password,
+          }),
+        });
+
+        const data = (await response.json()) as CollectionLoginResponse;
+
+        if (!response.ok || !data.success || !data.user) {
+          setCollectionError(data.error ?? "Invalid collection credentials");
+          return;
+        }
+
+        try {
+          localStorage.setItem("collectionUser", JSON.stringify(data.user));
+        } catch {}
+
+        // cookie collectionToken backend se already set ho raha hai
+        router.replace("/collection");
+        return;
+      }
+    } catch {
+      // individual error messages already handled with adminError/memberError/collectionError
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const isLoading = isSubmitting || adminLoading || (!!memberLoading && !memberToken);
+  const isLoading =
+    loginType === "admin"
+      ? adminLoading || isSubmitting
+      : loginType === "user"
+      ? memberLoading || isSubmitting
+      : isSubmitting;
 
-  const errorMessage = memberError ? String(memberError)
-    : (!memberToken && adminError ? String(adminError) : null);
+  const errorMessage =
+    loginType === "admin"
+      ? (adminError ? String(adminError) : null)
+      : loginType === "user"
+      ? (memberError ? String(memberError) : null)
+      : collectionError;
 
   return (
     <section className="bg-[var(--bg-main)] text-[var(--text-primary)] font-sans overflow-hidden min-h-screen">
-      {/* <Toaster position="top-center" /> */}
       <div className="max-w-7xl mx-auto min-h-screen flex flex-col md:flex-row relative transition-all duration-700 ease-in-out">
         <div className="hidden md:flex w-1/2 relative overflow-hidden">
           <motion.img
@@ -151,8 +220,13 @@ export default function AuthPage() {
               transition={{ duration: 0.7 }}
               className="absolute inset-0 flex flex-col justify-center items-center text-center px-10 text-[var(--text-light)]"
             >
-              <h2 className="text-4xl font-bold text-[var(--color-accent)] mb-4 drop-shadow-md">Secure Your Future</h2>
-              <p className="text-lg max-w-md text-gray-100">Join Cronnis Money Maven Chits — your trusted partner for smart savings and transparent chit fund management.</p>
+              <h2 className="text-4xl font-bold text-[var(--color-accent)] mb-4 drop-shadow-md">
+                Secure Your Future
+              </h2>
+              <p className="text-lg max-w-md text-gray-100">
+                Join Cronnis Money Maven Chits — your trusted partner for smart savings and
+                transparent chit fund management.
+              </p>
             </motion.div>
           </AnimatePresence>
         </div>
@@ -168,7 +242,46 @@ export default function AuthPage() {
             <h1 className="text-3xl md:text-4xl font-bold text-center mb-2 text-[var(--color-primary)]">
               CRONNIS <span className="text-[var(--color-accent)]">MONEY MAVEN CHITS</span>
             </h1>
-            <p className="text-center text-gray-600 mb-4">{isLogin ? "Login to continue your journey" : "Create your secure account"}</p>
+            <p className="text-center text-gray-600 mb-4">
+              {isLogin ? "Login to continue your journey" : "Create your secure account"}
+            </p>
+
+            {/* 🔹 LOGIN TYPE SELECTOR */}
+            <div className="flex justify-center mb-4 gap-2">
+              <button
+                type="button"
+                onClick={() => setLoginType("admin")}
+                className={`px-3 py-1 text-sm rounded-full border ${
+                  loginType === "admin"
+                    ? "bg-[var(--color-primary)] text-white"
+                    : "bg-transparent text-[var(--text-secondary)] border-[var(--border-color)]"
+                }`}
+              >
+                Admin
+              </button>
+              <button
+                type="button"
+                onClick={() => setLoginType("user")}
+                className={`px-3 py-1 text-sm rounded-full border ${
+                  loginType === "user"
+                    ? "bg-[var(--color-primary)] text-white"
+                    : "bg-transparent text-[var(--text-secondary)] border-[var(--border-color)]"
+                }`}
+              >
+                User
+              </button>
+              <button
+                type="button"
+                onClick={() => setLoginType("collector")}
+                className={`px-3 py-1 text-sm rounded-full border ${
+                  loginType === "collector"
+                    ? "bg-[var(--color-primary)] text-white"
+                    : "bg-transparent text-[var(--text-secondary)] border-[var(--border-color)]"
+                }`}
+              >
+                Collection
+              </button>
+            </div>
 
             <form className="space-y-5" onSubmit={handleSubmit}>
               <input
@@ -196,20 +309,16 @@ export default function AuthPage() {
                 {isLoading ? "Logging in..." : "Login"}
               </Button>
             </form>
-            {errorMessage &&
-              <div className="text-red-600 text-center font-medium mt-4">{errorMessage}</div>
-            }
 
-            <div className="flex justify-center gap-4 mt-5">
-              <Button onClick={() => router.push("/collection")}>Collection Portal</Button>
-            </div>
+            {errorMessage && (
+              <div className="text-red-600 text-center font-medium mt-4">
+                {errorMessage}
+              </div>
+            )}
 
-            <p className="text-center mt-6 text-gray-700">
-              {isLogin ? "Don't have an account?" : "Already have an account?"}
-              <span onClick={() => setIsLogin(!isLogin)} className="text-[var(--color-accent)] ml-2 cursor-pointer hover:underline transition">
-                {isLogin ? "Sign Up" : "Login"}
-              </span>
-            </p>
+            
+
+            
           </div>
         </motion.div>
       </div>

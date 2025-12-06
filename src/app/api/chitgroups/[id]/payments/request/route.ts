@@ -1,7 +1,7 @@
 // app/api/chitgroups/[id]/payments/request/route.ts
 import { NextResponse, type NextRequest } from "next/server";
 import dbConnect from "@/app/lib/mongodb";
-import Payment from "@/app/models/Payment";
+import Payment, { PaymentType } from "@/app/models/Payment";
 import { uploadBase64Image } from "@/app/lib/cloudinary";
 import mongoose from "mongoose";
 
@@ -261,57 +261,52 @@ export async function POST(req: NextRequest, context: RouteContext) {
     }
 
     type PaymentAllocatedForDoc = {
-      ledgerId?: mongoose.Types.ObjectId | string;
-      monthIndex?: number;
-      amount?: number;
-      penaltyApplied?: number;
-    };
+  ledgerId?: mongoose.Types.ObjectId | string;
+  monthIndex?: number;
+  amount?: number;
+  penaltyApplied?: number;
+};
 
-    const doc: {
-      memberId: mongoose.Types.ObjectId;
-      groupId: mongoose.Types.ObjectId;
-      amount: number;
-      type: string;
-      reference?: string;
-      adminNote?: string;
-      allocated?: PaymentAllocatedForDoc[];
-      rawMeta: { image?: ImageInfo; createdFrom: string };
-      verified: boolean;
-      status: string;
-      approvedAt: null;
-    } = {
-      memberId: new mongoose.Types.ObjectId(memberId),
-      groupId: new mongoose.Types.ObjectId(groupId),
-      amount: Number(amount),
-      type: "UPI",
-      reference,
-      adminNote: note,
-      allocated: allocated.length
-        ? allocated.map(
-            (a): PaymentAllocatedForDoc => ({
-              ledgerId:
-                a.ledgerId &&
-                mongoose.Types.ObjectId.isValid(
-                  String(a.ledgerId),
-                )
-                  ? new mongoose.Types.ObjectId(
-                      String(a.ledgerId),
-                    )
-                  : a.ledgerId,
-              monthIndex: a.monthIndex,
-              amount: a.amount,
-              penaltyApplied: a.penaltyApplied ?? 0,
-            }),
-          )
-        : undefined,
-      rawMeta: {
-        ...(imageInfo ? { image: imageInfo } : {}),
-        createdFrom: "member-request",
-      },
-      verified: false,
-      status,
-      approvedAt: null,
-    };
+const doc: {
+  memberId: mongoose.Types.ObjectId;
+  groupId: mongoose.Types.ObjectId;
+  amount: number;
+  type: PaymentType;
+  reference?: string;
+  adminNote?: string;
+  allocated?: PaymentAllocatedForDoc[];
+  rawMeta: { image?: ImageInfo; createdFrom: string };
+  verified: boolean;
+  status: string;
+  approvedAt: null;
+} = {
+  memberId: new mongoose.Types.ObjectId(memberId),
+  groupId: new mongoose.Types.ObjectId(groupId),
+  amount: Number(amount),
+  type: "UPI",
+  reference,
+  adminNote: note,
+  allocated: allocated.length
+    ? allocated.map((a): PaymentAllocatedForDoc => ({
+        ledgerId:
+          a.ledgerId &&
+          mongoose.Types.ObjectId.isValid(String(a.ledgerId))
+            ? new mongoose.Types.ObjectId(String(a.ledgerId))
+            : a.ledgerId,
+        monthIndex: a.monthIndex,
+        amount: a.amount,
+        penaltyApplied: a.penaltyApplied ?? 0,
+      }))
+    : undefined,
+  rawMeta: {
+    ...(imageInfo ? { image: imageInfo } : {}),
+    createdFrom: "member-request",
+  },
+  verified: false,
+  status,
+  approvedAt: null,
+};
+
 
     const payment = await Payment.create(doc);
     const saved = await Payment.findById(payment._id).lean();
