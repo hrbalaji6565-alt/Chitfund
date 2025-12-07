@@ -798,7 +798,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Link href="/groups">
+              <Link href="/admin/chit-groups">
                 <Button className="w-full h-20 bg-[var(--color-white)] hover:bg-[var(--bg-main)] text-[var(--text-primary)] rounded-2xl shadow-md hover:shadow-lg transition-all">
                   <div className="flex flex-col items-center gap-2">
                     <Users className="w-6 h-6 text-[var(--color-primary)]" />
@@ -808,7 +808,7 @@ export default function DashboardPage() {
                   </div>
                 </Button>
               </Link>
-              <Link href="/subscribers">
+              <Link href="/admin/members">
                 <Button className="w-full h-20 bg-[var(--color-white)] hover:bg-[var(--bg-main)] text-[var(--text-primary)] rounded-2xl shadow-md hover:shadow-lg transition-all">
                   <div className="flex flex-col items-center gap-2">
                     <Wallet className="w-6 h-6 text-[var(--color-secondary)]" />
@@ -818,7 +818,7 @@ export default function DashboardPage() {
                   </div>
                 </Button>
               </Link>
-              <Link href="/collections">
+              <Link href="/admin/collections">
                 <Button className="w-full h-20 bg-[var(--color-white)] hover:bg-[var(--bg-main)] text-[var(--text-primary)] rounded-2xl shadow-md hover:shadow-lg transition-all">
                   <div className="flex flex-col items-center gap-2">
                     <IndianRupee className="w-6 h-6 text-[var(--color-accent)]" />
@@ -828,7 +828,7 @@ export default function DashboardPage() {
                   </div>
                 </Button>
               </Link>
-              <Link href="/bidding">
+              <Link href="/admin/chits">
                 <Button className="w-full h-20 bg-[var(--color-white)] hover:bg-[var(--bg-main)] text-[var(--text-primary)] rounded-2xl shadow-md hover:shadow-lg transition-all">
                   <div className="flex flex-col items-center gap-2">
                     <Award className="w-6 h-6 text-[var(--color-accent)]" />

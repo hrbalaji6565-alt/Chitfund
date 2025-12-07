@@ -28,6 +28,7 @@ import {
 } from "@/app/components/ui/dialog";
 import { fetchMembers } from "@/store/memberSlice";
 import type { RootState, AppDispatch } from "@/store/store";
+import toast from "react-hot-toast";
 
 type Mode = "cash" | "upi" | "bank" | "cheque";
 
@@ -113,9 +114,7 @@ export default function CollectionsPage() {
     monthTotal: 0,
     yearTotal: 0,
   });
-  const [receiptRow, setReceiptRow] = useState<RowWithLocal | null>(
-    null,
-  );
+ 
 
   async function loadPending() {
     setLoading(true);
@@ -199,77 +198,72 @@ export default function CollectionsPage() {
   );
 
   async function handleCollect(row: RowWithLocal) {
-    try {
-      setErrorText(null);
-      if (row.payNow <= 0 || row.payNow > row.pending) {
-        setErrorText(
-          `Invalid amount for ${row.memberName ?? row.memberId}. It must be > 0 and ≤ pending.`,
-        );
-        return;
-      }
+  try {
+    setErrorText(null);
 
-      const body = {
-        chitGroupId: row.chitGroupId,
-        memberId: row.memberId,
-        monthIndex: row.monthIndex,
-        amount: row.payNow,
-        mode: row.mode,
-        note: "Collection visit",
-        utr: "",
-        collectorRole: "collector" as const,
-        collectedById: undefined,
-      };
-
-      const res = await fetch("/api/collections/collect", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      const json = (await res.json()) as {
-        success?: boolean;
-        error?: string;
-        stats?: Stats;
-      };
-
-      if (!res.ok || !json.success) {
-        throw new Error(json.error ?? res.statusText);
-      }
-
-      if (json.stats) {
-        setStats(json.stats);
-      }
-
-      // update local row
-      setRows((prev) =>
-        prev
-          .map((r) =>
-            r.id === row.id
-              ? {
-                  ...r,
-                  paid: r.paid + row.payNow,
-                  pending: Math.max(0, r.pending - row.payNow),
-                  payNow: Math.max(0, r.pending - row.payNow),
-                }
-              : r,
-          )
-          // fully paid rows hatado
-          .filter((r) => r.pending > 0),
-      );
-
-      setReceiptRow({
-        ...row,
-        pending: Math.max(0, row.pending - row.payNow),
-      });
-    } catch (err) {
+    if (row.payNow <= 0 || row.payNow > row.pending) {
       setErrorText(
-        err instanceof Error
-          ? err.message
-          : "Failed to submit collection",
+        `Invalid amount for ${row.memberName ?? row.memberId}. It must be > 0 and ≤ pending.`
       );
+      return;
     }
+
+    const body = {
+      chitGroupId: row.chitGroupId,
+      memberId: row.memberId,
+      monthIndex: row.monthIndex,
+      amount: row.payNow,
+      mode: row.mode,
+      note: "Collection visit",
+      utr: "",
+      collectorRole: "collector" as const,
+      collectedById: undefined,
+    };
+
+    const res = await fetch("/api/collections/collect", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const json = (await res.json()) as {
+      success?: boolean;
+      error?: string;
+      stats?: Stats;
+    };
+
+    if (!res.ok || !json.success) {
+      throw new Error(json.error ?? res.statusText);
+    }
+
+    if (json.stats) {
+      setStats(json.stats);
+    }
+
+    setRows((prev) =>
+      prev
+        .map((r) =>
+          r.id === row.id
+            ? {
+                ...r,
+                paid: r.paid + row.payNow,
+                pending: Math.max(0, r.pending - row.payNow),
+                payNow: Math.max(0, r.pending - row.payNow),
+              }
+            : r
+        )
+        .filter((r) => r.pending > 0)
+    );
+
+    toast.success("Collection successful");
+  } catch (err) {
+    setErrorText(
+      err instanceof Error ? err.message : "Failed to submit collection"
+    );
   }
+}
+
 
   const displayMemberName = (r: RowWithLocal): string =>
     r.memberName ??
@@ -558,80 +552,7 @@ export default function CollectionsPage() {
         </CardContent>
       </Card>
 
-      {/* Receipt dialog */}
-      {receiptRow && (
-        <Dialog open onOpenChange={() => setReceiptRow(null)}>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Collection receipt</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between border-b pb-1">
-                <span className="text-gray-500">Member</span>
-                <span className="font-semibold">
-                  {displayMemberName(receiptRow)}
-                </span>
-              </div>
-              <div className="flex justify-between border-b pb-1">
-                <span className="text-gray-500">Group</span>
-                <span className="font-semibold">
-                  {receiptRow.chitGroupName}
-                </span>
-              </div>
-              <div className="flex justify-between border-b pb-1">
-                <span className="text-gray-500">Month</span>
-                <span className="font-semibold">
-                  #{receiptRow.monthIndex}
-                </span>
-              </div>
-              <div className="flex justify-between border-b pb-1">
-                <span className="text-gray-500">
-                  Amount collected
-                </span>
-                <span className="font-semibold text-emerald-600">
-                  {fmtCurrency(receiptRow.payNow)}
-                </span>
-              </div>
-              <div className="flex justify-between border-b pb-1">
-                <span className="text-gray-500">Mode</span>
-                <span className="font-semibold uppercase">
-                  {receiptRow.mode}
-                </span>
-              </div>
-              <div className="flex justify-between border-b pb-1">
-                <span className="text-gray-500">
-                  Pending after this
-                </span>
-                <span className="font-semibold text-red-600">
-                  {fmtCurrency(
-                    Math.max(
-                      0,
-                      receiptRow.pending - receiptRow.payNow,
-                    ),
-                  )}
-                </span>
-              </div>
-              <div className="pt-2 text-xs text-gray-500 text-center">
-                This is a temporary receipt; final payment
-                status is visible in admin & user transaction
-                screens.
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 mt-3">
-              <Button variant="outline" size="sm">
-                <Download className="w-4 h-4 mr-1" />
-                Download
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => setReceiptRow(null)}
-              >
-                Close
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
+     
     </div>
   );
 }
