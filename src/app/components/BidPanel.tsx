@@ -27,6 +27,7 @@ type AuctionInfo = {
   winningMemberId: string;
   winningDiscount: number;
   winningPayout: number;
+  winningBidAmount?: number;
 };
 
 const toNum = (v: unknown): number => {
@@ -56,6 +57,8 @@ const BidPanel: FC<BidPanelProps> = ({
   const [metaPot, setMetaPot] = useState<number | null>(null);
   const [adminCommissionAmount, setAdminCommissionAmount] =
     useState<number>(0);
+  const [metaTotalMembers, setMetaTotalMembers] =
+    useState<number | null>(null);
 
   const [apiBiddingOpen, setApiBiddingOpen] = useState(false);
   const [apiBiddingMonth, setApiBiddingMonth] = useState<number | null>(
@@ -189,10 +192,17 @@ const BidPanel: FC<BidPanelProps> = ({
                   (metaRaw as { adminCommission?: unknown }).adminCommission,
               )
             : 0;
-          setAdminCommissionAmount(
+          const admin =
             adminFromMeta > 0
               ? adminFromMeta
-              : Math.round(expectedMonthlyTotal * 0.04),
+              : Math.round(expectedMonthlyTotal * 0.04);
+          setAdminCommissionAmount(admin);
+
+          const totalMembersFromMeta = metaRaw
+            ? toNum(metaRaw.totalMembers)
+            : 0;
+          setMetaTotalMembers(
+            totalMembersFromMeta > 0 ? totalMembersFromMeta : null,
           );
 
           const bArrRaw = Array.isArray(obj.bids) ? obj.bids : [];
@@ -209,7 +219,11 @@ const BidPanel: FC<BidPanelProps> = ({
             const discount = toNum(
               r.discount ?? r.discountOffered ?? r.amount ?? 0,
             );
-            const bidAmount = toNum(r.bidAmount ?? 0);
+            const bidAmountRaw = toNum(r.bidAmount ?? 0);
+            const bidAmount =
+              bidAmountRaw > 0
+                ? bidAmountRaw
+                : expectedMonthlyTotal + admin + discount;
             const createdAt =
               typeof r.createdAt === "string"
                 ? r.createdAt
@@ -270,15 +284,49 @@ const BidPanel: FC<BidPanelProps> = ({
                 (rawAuction as { winner?: unknown }).winner ??
                 "",
             );
-            const winningDiscount = toNum(
+
+            let winningDiscount = toNum(
               rawAuction.winningDiscount ??
-                (rawAuction as { winningBidAmount?: unknown })
-                  .winningBidAmount ??
+                (rawAuction as { discountOffered?: unknown })
+                  .discountOffered ??
                 0,
             );
-            const winningPayout = toNum(
+
+            const totalPotFromState =
+              metaPot && metaPot > 0 ? metaPot : 0;
+            const totalPot =
+              totalPotFromState > 0 ? totalPotFromState : chitValue || 0;
+            const adminFromState = adminCommissionAmount || Math.round(totalPot * 0.04);
+
+            let winningBidAmount = toNum(
+              (rawAuction as { winningBidAmount?: unknown })
+                .winningBidAmount ??
+                (rawAuction as { totalBidAmount?: unknown })
+                  .totalBidAmount ??
+                (rawAuction as { bidAmount?: unknown }).bidAmount ??
+                0,
+            );
+
+            if (!winningDiscount && winningBidAmount > 0 && totalPot > 0) {
+              const basePlusAdmin = totalPot + adminFromState;
+              const diff = winningBidAmount - basePlusAdmin;
+              winningDiscount = diff > 0 ? diff : 0;
+            }
+
+            if (!winningBidAmount && totalPot > 0) {
+              winningBidAmount = totalPot + adminFromState + winningDiscount;
+            }
+
+            let winningPayout = toNum(
               rawAuction.winningPayout ?? rawAuction.payoutToWinner ?? 0,
             );
+            if (!winningPayout && totalPot > 0) {
+              winningPayout = Math.max(
+                0,
+                totalPot - winningDiscount - adminFromState,
+              );
+            }
+
             const monthIndex = toNum(
               rawAuction.monthIndex ??
                 (rawAuction as { biddingMonthIndex?: unknown })
@@ -295,6 +343,7 @@ const BidPanel: FC<BidPanelProps> = ({
                 winningMemberId,
                 winningDiscount,
                 winningPayout,
+                winningBidAmount,
               });
             } else {
               setAuctionInfo(null);
@@ -330,7 +379,7 @@ const BidPanel: FC<BidPanelProps> = ({
     return () => {
       alive = false;
     };
-  }, [chitId, currentMonthIndex]);
+  }, [chitId, currentMonthIndex, chitValue]);
 
   // MEMBER NAMES
   useEffect(() => {
@@ -412,7 +461,9 @@ const BidPanel: FC<BidPanelProps> = ({
 
     if (myBidAmount < minAllowedBid) {
       setErrorText(
-        `Minimum allowed bid for this month is ${fmtMoney(minAllowedBid)} (base pot + admin commission).`,
+        `Minimum allowed bid for this month is ${fmtMoney(
+          minAllowedBid,
+        )} (base pot + admin commission).`,
       );
       return;
     }
@@ -462,6 +513,21 @@ const BidPanel: FC<BidPanelProps> = ({
 
       if (refRes.ok && refJson && typeof refJson === "object") {
         const obj = refJson as UnknownRecord;
+        const metaRaw = obj.meta as UnknownRecord | undefined;
+        const expectedMonthlyTotal = metaRaw
+          ? toNum(metaRaw.expectedMonthlyTotal)
+          : 0;
+        const adminFromMeta = metaRaw
+          ? toNum(
+              metaRaw.adminCommissionAmount ??
+                (metaRaw as { adminCommission?: unknown }).adminCommission,
+            )
+          : adminCommissionAmount;
+        const admin =
+          adminFromMeta > 0
+            ? adminFromMeta
+            : Math.round(expectedMonthlyTotal * 0.04);
+
         const bArrRaw = Array.isArray(obj.bids) ? obj.bids : [];
         const rows: BidRow[] = bArrRaw.map((raw) => {
           const r = raw as UnknownRecord;
@@ -476,7 +542,11 @@ const BidPanel: FC<BidPanelProps> = ({
           const discount = toNum(
             r.discount ?? r.discountOffered ?? r.amount ?? 0,
           );
-          const bidAmount = toNum(r.bidAmount ?? 0);
+          const bidAmountRaw = toNum(r.bidAmount ?? 0);
+          const bidAmount =
+            bidAmountRaw > 0
+              ? bidAmountRaw
+              : expectedMonthlyTotal + admin + discount;
           const createdAt =
             typeof r.createdAt === "string"
               ? r.createdAt
@@ -521,6 +591,19 @@ const BidPanel: FC<BidPanelProps> = ({
       : memberNames[auctionInfo.winningMemberId] ??
         auctionInfo.winningMemberId;
 
+    const totalMembers =
+      metaTotalMembers && metaTotalMembers > 0
+        ? metaTotalMembers
+        : undefined;
+
+    const perMemberDiscount =
+      totalMembers && auctionInfo.winningDiscount > 0
+        ? Math.round(auctionInfo.winningDiscount / totalMembers)
+        : null;
+
+    const pot = basePot;
+    const admin = adminCommissionAmount;
+
     return (
       <div className="mb-2 text-[11px] sm:text-xs rounded border border-emerald-400 bg-emerald-50 px-2 py-1">
         <div className="font-semibold text-emerald-700">
@@ -528,7 +611,7 @@ const BidPanel: FC<BidPanelProps> = ({
         </div>
         <div className="text-emerald-700">
           Winner: <span className="font-semibold">{labelName}</span>{" "}
-          {isMe ? "(you)" : null} • Discount:{" "}
+          {isMe ? "(you)" : null} • Discount for members:{" "}
           <span className="font-semibold">
             {fmtMoney(auctionInfo.winningDiscount)}
           </span>{" "}
@@ -536,6 +619,14 @@ const BidPanel: FC<BidPanelProps> = ({
           <span className="font-semibold">
             {fmtMoney(auctionInfo.winningPayout)}
           </span>
+        </div>
+        <div className="text-[10px] sm:text-[11px] text-emerald-800 mt-1">
+          Pot this month {fmtMoney(pot)}, admin commission approx{" "}
+          {fmtMoney(admin)}. Members share discount{" "}
+          {fmtMoney(auctionInfo.winningDiscount)}
+          {perMemberDiscount && totalMembers
+            ? ` ≈ ${fmtMoney(perMemberDiscount)} per member (${totalMembers} members).`
+            : "."}
         </div>
         {isMe && (
           <div className="text-[10px] sm:text-[11px] text-emerald-800 mt-1">
@@ -545,7 +636,16 @@ const BidPanel: FC<BidPanelProps> = ({
         )}
       </div>
     );
-  }, [auctionInfo, currentMonthIndex, memberId, bids, memberNames]);
+  }, [
+    auctionInfo,
+    currentMonthIndex,
+    memberId,
+    bids,
+    memberNames,
+    basePot,
+    adminCommissionAmount,
+    metaTotalMembers,
+  ]);
 
   return (
     <div className="border rounded-lg p-1 sm:p-4 bg-white text-xs sm:text-sm space-y-2 w-70 sm:w-auto">
@@ -694,7 +794,6 @@ const BidPanel: FC<BidPanelProps> = ({
                     </td>
                     <td className="p-1">{fmtMoney(b.bidAmount)}</td>
                     <td className="p-1">{fmtMoney(b.discount)}</td>
-                   
                   </tr>
                 ))}
               </tbody>

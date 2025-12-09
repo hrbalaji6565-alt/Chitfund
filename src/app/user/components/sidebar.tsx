@@ -29,6 +29,8 @@ const Sidebar: React.FC = () => {
     { href: "/user/profile", label: "Profile", icon: <Users size={16} /> },
     { href: "/user/active-funds", label: "Active Funds", icon: <Wallet size={16} /> },
     { href: "/user/transactions", label: "Transactions", icon: <FileText size={16} /> },
+    // { href: "/user/loans", label: "Loan", icon: <FileText size={16} /> },
+    // { href: "/user/loan-transactions", label: "Loan Transactions", icon: <FileText size={16} /> },
   ];
    const router = useRouter();
   const dispatch = useDispatch<AppDispatch>();

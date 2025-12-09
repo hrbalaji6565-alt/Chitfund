@@ -68,6 +68,9 @@ const Sidebar: React.FC = () => {
     { href: "/admin/transactions", label: "Transactions", icon: <FileText size={16} /> },
     { href: "/admin/collection", label: "Collection", icon: <ListCollapseIcon size={16} /> },
     { href: "/admin/collection-user", label: "Collection User", icon: <FileText size={16} /> },
+    // { href: "/admin/loans", label: "Loans", icon: <Wallet size={16} /> },
+    // { href: "/admin/loan-collection", label: "Loan Collection", icon: <ListCollapseIcon size={16} /> },
+    // { href: "/admin/loan-transactions", label: "Loan Transactions", icon: <FileText size={16} /> },
     { href: "/admin/invoice", label: "Invoices", icon: <FileText size={16} /> },
     { href: "/admin/reports", label: "Reports", icon: <BarChart2 size={16} /> },
   ];

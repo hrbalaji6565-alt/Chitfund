@@ -8,17 +8,20 @@ import React, {
 } from "react";
 import QRCode from "qrcode";
 import { motion, AnimatePresence } from "framer-motion";
-import { Calendar, Search as SearchIcon } from "lucide-react";
+import { Calendar, Search as SearchIcon, ChevronDown, ChevronUp } from "lucide-react";
 import { Card, CardContent } from "@/app/components/ui/card";
 import { Badge } from "@/app/components/ui/badge";
 import { Input } from "@/app/components/ui/input";
-import { useSelector } from "react-redux";
-import type { RootState } from "@/store/store";
-import BidPanel from "@/app/components/BidPanel";
-import type { ChitGroup } from "@/app/lib/types";
+import { useSelector, useDispatch } from "react-redux";
 import Image from "next/image";
 
-/* ---------- small helpers & types ---------- */
+import type { RootState, AppDispatch } from "@/store/store";
+import type { ChitGroup } from "@/app/lib/types";
+import BidPanel from "@/app/components/BidPanel";
+import { fetchGroups } from "@/store/chitGroupSlice";
+
+/* ---------- helpers & types ---------- */
+
 type AnyObject = { [key: string]: unknown };
 
 const isRecord = (x: unknown): x is AnyObject =>
@@ -31,14 +34,16 @@ const toStr = (v: unknown, d = ""): string =>
       ? String(v)
       : d;
 
-const toNum = (v: unknown, d = 0): number =>
-  typeof v === "number" && !Number.isNaN(v)
-    ? v
-    : typeof v === "string" && v.trim()
-      ? Number(v) || d
-      : d;
+const toNum = (v: unknown, d = 0): number => {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim()) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : d;
+  }
+  return d;
+};
 
-const idStr = (x: unknown) =>
+const idStr = (x: unknown): string =>
   typeof x === "string"
     ? x
     : typeof x === "number"
@@ -47,7 +52,7 @@ const idStr = (x: unknown) =>
         ? toStr(x._id ?? x.id ?? "")
         : "";
 
-const monthsElapsedSinceStart = (start?: string) => {
+const monthsElapsedSinceStart = (start?: string): number => {
   if (!start) return 1;
   const s = new Date(start);
   if (Number.isNaN(s.getTime())) return 1;
@@ -59,7 +64,6 @@ const monthsElapsedSinceStart = (start?: string) => {
   return Math.max(1, months + 1);
 };
 
-/* ----- Types ----- */
 type PaymentMeta = {
   id?: string;
   date?: string;
@@ -130,7 +134,8 @@ type MemberFundSummary = {
   pending: number;
 };
 
-/* ---------- Payment panel ---------- */
+/* ---------- Payment panel (per member × group) ---------- */
+
 function PaymentPanel({
   groupObj,
   memberId,
@@ -139,28 +144,50 @@ function PaymentPanel({
   groupObj: unknown;
   memberId: string;
   onSummaryChange?: (summary: MemberFundSummary) => void;
-}) {
+})  {
   const [payments, setPayments] = useState<AnyObject[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
   const [amount, setAmount] = useState<number | "">("");
   const [note, setNote] = useState("");
   const [utr, setUtr] = useState("");
   const [file, setFile] = useState<File | null>(null);
+
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [showQr, setShowQr] = useState(false);
 
   const [auctionDiscountShare, setAuctionDiscountShare] = useState(0);
   const [canPayThisMonth, setCanPayThisMonth] = useState(false);
   const [auctionDate, setAuctionDate] = useState<string | null>(null);
-  const [auctionMonthIndex, setAuctionMonthIndex] =
-    useState<number | null>(null);
-
-  // winner payout for this user (agar jeeta hai)
+  const [auctionMonthIndex, setAuctionMonthIndex] = useState<number | null>(null);
   const [myWinningPayout, setMyWinningPayout] = useState(0);
 
-  // derived
+  const startDate = isRecord(groupObj) ? toStr(groupObj.startDate ?? "") : "";
+
+  const totalMonthsFromModel = isRecord(groupObj)
+    ? Math.max(
+        1,
+        toNum(
+          groupObj.totalMonths ??
+            groupObj.numberOfInstallments ??
+            12,
+        ),
+      )
+    : 12;
+
+  const penaltyPercent = isRecord(groupObj)
+    ? toNum(
+        groupObj.penaltyPercent ??
+          groupObj.penalty ??
+          groupObj.penalty_rate ??
+          0,
+      )
+    : 0;
+
+  const curMonth = monthsElapsedSinceStart(startDate);
+
   const perMember = useMemo(() => {
     if (!isRecord(groupObj)) return 0;
     const monthly = toNum(
@@ -196,39 +223,11 @@ function PaymentPanel({
     return 0;
   }, [groupObj]);
 
-  const startDate = isRecord(groupObj)
-    ? toStr(groupObj.startDate ?? "")
-    : "";
-  const totalMonthsFromModel = isRecord(groupObj)
-    ? Math.max(
-        1,
-        toNum(
-          groupObj.totalMonths ??
-            groupObj.numberOfInstallments ??
-            12,
-        ),
-      )
-    : 12;
-  const penaltyPercent = isRecord(groupObj)
-    ? toNum(
-        groupObj.penaltyPercent ??
-          groupObj.penalty ??
-          groupObj.penalty_rate ??
-          0,
-      )
-    : 0;
-  const curMonth = monthsElapsedSinceStart(startDate);
-
-  // helper: extract member id from a payment record robustly
   const extractPaymentMemberId = (p: AnyObject): string | undefined => {
     const memberIdField = p.memberId;
-    if (typeof memberIdField === "string" && memberIdField) {
-      return memberIdField;
-    }
+    if (typeof memberIdField === "string" && memberIdField) return memberIdField;
     const memberField = p.member;
-    if (typeof memberField === "string" && memberField) {
-      return memberField;
-    }
+    if (typeof memberField === "string" && memberField) return memberField;
     if (isRecord(memberField)) {
       return toStr(
         memberField._id ??
@@ -237,36 +236,29 @@ function PaymentPanel({
           "",
       );
     }
-    if (typeof memberIdField === "number") {
-      return String(memberIdField);
-    }
+    if (typeof memberIdField === "number") return String(memberIdField);
     return undefined;
   };
 
-  // normalize + dedupe payments and filter by memberId
   const normalizeAndFilterPayments = useCallback(
     (arr: unknown[]): AnyObject[] => {
       const map = new Map<string, AnyObject>();
+
       for (const p of arr) {
         if (!isRecord(p)) continue;
-        const idSource =
-          p._id ?? p.id ?? Math.random().toString(36).slice(2);
+        const idSource = p._id ?? p.id ?? Math.random().toString(36).slice(2);
         const pid = toStr(idSource);
         if (!pid) continue;
 
         const existing = map.get(pid);
         if (existing) {
           const existingGood = Boolean(
-            existing.verified ??
-              existing.isVerified ??
-              existing.approvedAt,
+            existing.verified ?? existing.isVerified ?? existing.approvedAt,
           );
           const curGood = Boolean(
             p.verified ?? p.isVerified ?? p.approvedAt,
           );
-          if (curGood && !existingGood) {
-            map.set(pid, p);
-          }
+          if (curGood && !existingGood) map.set(pid, p);
         } else {
           map.set(pid, p);
         }
@@ -283,37 +275,41 @@ function PaymentPanel({
     [memberId],
   );
 
-  /* fetch payments for this member & group */
   useEffect(() => {
     let alive = true;
     (async () => {
       setLoading(true);
       setErr(null);
+
       try {
-        const gid = isRecord(groupObj)
-          ? toStr(groupObj._id ?? groupObj.id ?? "")
-          : "";
-        if (!gid || !memberId) {
+        if (!isRecord(groupObj) || !memberId) {
           if (alive) setPayments([]);
           return;
         }
+
+        const gid = toStr(groupObj._id ?? groupObj.id ?? "");
+        if (!gid) {
+          if (alive) setPayments([]);
+          return;
+        }
+
         const url = `/api/chitgroups/${encodeURIComponent(
           gid,
         )}/payments?memberId=${encodeURIComponent(
           memberId,
         )}&all=true`;
+
         const res = await fetch(url, { credentials: "include" });
-        const j = await res.json().catch(() => [] as unknown);
+        const j: unknown = await res.json().catch(() => []);
+
         if (!alive) return;
+
         let arr: unknown[] = [];
         if (Array.isArray(j)) arr = j;
-        else if (isRecord(j) && Array.isArray(j.payments)) {
-          arr = j.payments;
-        } else if (isRecord(j) && Array.isArray(j.data)) {
-          arr = j.data;
-        } else if (isRecord(j) && Array.isArray(j.items)) {
-          arr = j.items;
-        }
+        else if (isRecord(j) && Array.isArray(j.payments)) arr = j.payments;
+        else if (isRecord(j) && Array.isArray(j.data)) arr = j.data;
+        else if (isRecord(j) && Array.isArray(j.items)) arr = j.items;
+
         const filtered = normalizeAndFilterPayments(arr);
         if (alive) setPayments(filtered);
       } catch (e) {
@@ -329,7 +325,6 @@ function PaymentPanel({
     };
   }, [groupObj, memberId, normalizeAndFilterPayments]);
 
-  // helper: parse allocation entries present inside a payment record
   const parseAllocations = (
     raw: AnyObject,
   ):
@@ -357,27 +352,21 @@ function PaymentPanel({
         }[];
       }
       if (isRecord(cand)) {
-        if (Array.isArray(cand.allocation)) {
-          return cand.allocation as {
-            monthIndex?: number;
-            principal?: unknown;
-            penalty?: unknown;
-          }[];
-        }
-        if (Array.isArray(cand.allocated)) {
-          return cand.allocated as {
-            monthIndex?: number;
-            principal?: unknown;
-            penalty?: unknown;
-          }[];
-        }
-        if (Array.isArray(cand.allocationSummary)) {
-          return cand.allocationSummary as {
-            monthIndex?: number;
-            principal?: unknown;
-            penalty?: unknown;
-          }[];
-        }
+        if (Array.isArray(cand.allocation)) return cand.allocation as {
+          monthIndex?: number;
+          principal?: unknown;
+          penalty?: unknown;
+        }[];
+        if (Array.isArray(cand.allocated)) return cand.allocated as {
+          monthIndex?: number;
+          principal?: unknown;
+          penalty?: unknown;
+        }[];
+        if (Array.isArray(cand.allocationSummary)) return cand.allocationSummary as {
+          monthIndex?: number;
+          principal?: unknown;
+          penalty?: unknown;
+        }[];
       }
       if (typeof cand === "string") {
         try {
@@ -412,29 +401,28 @@ function PaymentPanel({
         for (const item of arr) {
           const obj: AnyObject = isRecord(item) ? item : {};
           let m = obj.monthIndex;
+
           if (typeof m === "number" && m >= 0 && m < 1) m += 1;
-          if (
-            m === undefined &&
-            typeof raw.monthIndex === "number"
-          ) {
+
+          if (m === undefined && typeof raw.monthIndex === "number") {
             m = raw.monthIndex;
           }
+
           const monthIndex =
-            typeof m === "number" && !Number.isNaN(m)
+            typeof m === "number" && Number.isFinite(m)
               ? Math.round(m)
               : 1;
 
           const principal = toNum(
             obj.principalPaid ??
               obj.principal ??
-              obj.prc ??
-              obj.pr ??
               obj.amount ??
               0,
           );
           const penalty = toNum(
-            obj.penaltyPaid ?? obj.penalty ?? obj.pen ?? 0,
+            obj.penaltyPaid ?? obj.penalty ?? 0,
           );
+
           norm.push({
             monthIndex: Math.max(1, monthIndex),
             principal,
@@ -447,7 +435,6 @@ function PaymentPanel({
     return undefined;
   };
 
-  /* month-wise summary (discount applied for current month) */
   const monthsSummary: MonthType[] = useMemo(() => {
     const monthsCount = Math.max(
       totalMonthsFromModel || 12,
@@ -471,6 +458,7 @@ function PaymentPanel({
             month: "short",
           })} ${d.getFullYear()}`;
         })();
+
         return {
           idx: i + 1,
           label,
@@ -499,23 +487,25 @@ function PaymentPanel({
 
     for (const p of payments) {
       if (!isRecord(p)) continue;
+
       const rawStatus = p.status ?? p.state;
       const statusStr =
         typeof rawStatus === "string"
           ? rawStatus.toLowerCase()
           : undefined;
+
       const verifiedFlag = Boolean(
         p.verified ?? p.isVerified ?? false,
       );
       const approvedAtFlag = Boolean(p.approvedAt);
+
       const isApproved =
-        statusStr === "approved" ||
-        verifiedFlag ||
-        approvedAtFlag;
+        statusStr === "approved" || verifiedFlag || approvedAtFlag;
 
       if (!isApproved) continue;
 
       const allocs = parseAllocations(p);
+
       if (allocs && allocs.length) {
         for (const a of allocs) {
           addToMonth(a.monthIndex, a.principal, a.penalty, {
@@ -528,6 +518,7 @@ function PaymentPanel({
         }
       } else {
         let monthIndex: number | undefined;
+
         if (typeof p.monthIndex === "number") {
           monthIndex = p.monthIndex;
         } else if (
@@ -539,9 +530,7 @@ function PaymentPanel({
           typeof p.date === "string" ||
           typeof p.createdAt === "string"
         ) {
-          const d = new Date(
-            (p.date ?? p.createdAt) as string,
-          );
+          const d = new Date((p.date ?? p.createdAt) as string);
           if (startDate) {
             const sdate = new Date(startDate);
             monthIndex =
@@ -554,6 +543,7 @@ function PaymentPanel({
         } else {
           monthIndex = curMonth;
         }
+
         const principal = toNum(p.amount ?? p.amt ?? 0);
         addToMonth(
           typeof monthIndex === "number" ? monthIndex : curMonth,
@@ -576,7 +566,7 @@ function PaymentPanel({
           ? Math.max(
               0,
               perMember -
-                Math.round(auctionDiscountShare ?? 0),
+                Math.round(auctionDiscountShare),
             )
           : perMember;
 
@@ -609,10 +599,8 @@ function PaymentPanel({
     return bucket ? Math.round(bucket.paid) : 0;
   }, [monthsSummary, curMonth]);
 
-  /* fetch auction info for discount + gating payments + winner payout */
   useEffect(() => {
     let alive = true;
-
     (async () => {
       setAuctionDiscountShare(0);
       setCanPayThisMonth(false);
@@ -620,42 +608,39 @@ function PaymentPanel({
       setAuctionMonthIndex(null);
       setMyWinningPayout(0);
 
-      if (!isRecord(groupObj)) return;
+      if (!isRecord(groupObj) || !memberId) return;
+
       const gid = toStr(groupObj._id ?? groupObj.id ?? "");
-      if (!gid || !memberId) return;
+      if (!gid) return;
 
       try {
         const url = `/api/chitgroups/${encodeURIComponent(
           gid,
         )}/auction?monthIndex=${curMonth}`;
-        const res = await fetch(url, {
-          credentials: "include",
-        });
-        const json: unknown = await res
-          .json()
-          .catch(() => ({} as unknown));
+        const res = await fetch(url, { credentials: "include" });
+        const json: unknown = await res.json().catch(() => ({}));
+
         if (!alive) return;
+        if (!isRecord(json)) return;
 
         let auctionRaw: AnyObject | null = null;
 
-        if (isRecord(json)) {
-          if (isRecord(json.auction)) {
-            auctionRaw = json.auction;
-          } else if (isRecord(json.data)) {
-            auctionRaw = json.data;
-          } else if (Array.isArray(json.auctions)) {
-            const arr = json.auctions;
-            const withMonth = arr.filter(
-              (a) =>
-                isRecord(a) &&
-                typeof a.monthIndex === "number" &&
-                a.monthIndex === curMonth,
-            );
-            const pick =
-              (withMonth[0] as AnyObject | undefined) ??
-              (arr[arr.length - 1] as AnyObject | undefined);
-            if (pick && isRecord(pick)) auctionRaw = pick;
-          }
+        if (isRecord(json.auction)) {
+          auctionRaw = json.auction;
+        } else if (isRecord(json.data)) {
+          auctionRaw = json.data;
+        } else if (Array.isArray(json.auctions)) {
+          const arr = json.auctions;
+          const withMonth = arr.filter(
+            (a) =>
+              isRecord(a) &&
+              typeof a.monthIndex === "number" &&
+              a.monthIndex === curMonth,
+          );
+          const pick =
+            (withMonth[0] as AnyObject | undefined) ??
+            (arr[arr.length - 1] as AnyObject | undefined);
+          if (pick && isRecord(pick)) auctionRaw = pick;
         }
 
         if (!auctionRaw) {
@@ -667,7 +652,6 @@ function PaymentPanel({
           return;
         }
 
-        // winner info
         const winningMemberId = toStr(
           auctionRaw.winningMemberId ??
             (auctionRaw as { winner?: unknown }).winner ??
@@ -687,9 +671,8 @@ function PaymentPanel({
         }
 
         const distRaw = auctionRaw.distributedToMembers;
-        if (!Array.isArray(distRaw)) {
-          if (alive) setAuctionDiscountShare(0);
-        } else {
+
+        if (Array.isArray(distRaw)) {
           let myShare = 0;
           for (const d of distRaw) {
             if (!isRecord(d)) continue;
@@ -701,6 +684,8 @@ function PaymentPanel({
             }
           }
           if (alive) setAuctionDiscountShare(myShare);
+        } else if (alive) {
+          setAuctionDiscountShare(0);
         }
 
         const mIdx = toNum(
@@ -715,6 +700,7 @@ function PaymentPanel({
           Number.isFinite(mIdx) && mIdx > 0
             ? Math.round(mIdx)
             : curMonth;
+
         if (alive) {
           setAuctionMonthIndex(normalizedMonth);
           setCanPayThisMonth(normalizedMonth === curMonth);
@@ -726,6 +712,7 @@ function PaymentPanel({
             : typeof auctionRaw.date === "string"
               ? auctionRaw.date
               : null;
+
         if (alive) setAuctionDate(createdAt);
       } catch {
         if (alive) {
@@ -735,7 +722,6 @@ function PaymentPanel({
         }
       }
     })();
-
     return () => {
       alive = false;
     };
@@ -750,7 +736,6 @@ function PaymentPanel({
     expectedThisMonth - paidThisMonth,
   );
 
-  /* overdue & penalty (compound) + current-month penalty after 4 days */
   const overdue = useMemo<OverdueInfo>(() => {
     const info: OverdueInfo = {
       totalRem: 0,
@@ -759,13 +744,11 @@ function PaymentPanel({
       maxPayableIfClearNow: 0,
       currentMonthPenalty: 0,
     };
-    const per = perMember;
 
-    // old months (< curMonth)
     for (let mi = 1; mi < curMonth; mi += 1) {
       const b = monthsSummary[mi - 1];
       const paid = b ? b.paid : 0;
-      const rem = Math.max(0, per - paid);
+      const rem = Math.max(0, perMember - paid);
       if (rem > 0) {
         const monthsOver = curMonth - mi;
         let remWithPenalty = rem;
@@ -774,6 +757,7 @@ function PaymentPanel({
         }
         const pen = remWithPenalty - rem;
         const penRounded = Math.round(pen);
+
         info.totalRem += rem;
         info.penaltyIfNow += penRounded;
         info.details.push({
@@ -786,7 +770,6 @@ function PaymentPanel({
       }
     }
 
-    // current month penalty after 4 days from auction
     if (
       auctionMonthIndex === curMonth &&
       auctionDate &&
@@ -797,9 +780,7 @@ function PaymentPanel({
       if (!Number.isNaN(aDate.getTime())) {
         const now = new Date();
         const diffMs = now.getTime() - aDate.getTime();
-        const diffDays = Math.floor(
-          diffMs / (1000 * 60 * 60 * 24),
-        );
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
         if (diffDays > 4) {
           const pen = Math.round(
             monthlyRemaining * (penaltyPercent / 100),
@@ -826,14 +807,12 @@ function PaymentPanel({
     auctionDate,
   ]);
 
-    /* member-level fund summary for top cards */
   const memberAggregate = useMemo<MemberFundSummary | null>(() => {
     if (!isRecord(groupObj)) return null;
 
     const gid = toStr(groupObj._id ?? groupObj.id ?? "");
     if (!gid) return null;
 
-    // fund jitne ka hai utna hi total (100000 etc.)
     const chitValue = toNum(
       (groupObj as { chitValue?: unknown }).chitValue ??
         (groupObj as { totalAmount?: unknown }).totalAmount ??
@@ -842,24 +821,19 @@ function PaymentPanel({
     const totalFundsForMember =
       chitValue > 0 ? chitValue : perMember * totalMonthsFromModel;
 
-    // saare months ka principal jo user ne pay kiya
     const totalPaidPrincipal = monthsSummary.reduce(
       (sum, m) => sum + m.paid,
       0,
     );
 
-    // is month ka discount:
-    // EMI 10000, auction ke baad 9000 → discount = 1000
     const discountCurrentMonth = Math.max(
       0,
       perMember - expectedThisMonth,
     );
 
-    // jitna actual pay karna hai (discount minus karke)
     const effectiveTotalPayable =
       totalFundsForMember - discountCurrentMonth;
 
-    // pending = payable - jo pay ho chuka
     const pendingForMember = Math.max(
       0,
       effectiveTotalPayable - totalPaidPrincipal,
@@ -868,9 +842,7 @@ function PaymentPanel({
     return {
       groupId: gid,
       totalFunds: totalFundsForMember,
-      // collected me sirf user ka paid amount
       collected: Math.round(totalPaidPrincipal),
-      // pending me discount adjust karke bacha hua
       pending: Math.round(pendingForMember),
     };
   }, [
@@ -881,14 +853,11 @@ function PaymentPanel({
     expectedThisMonth,
   ]);
 
-
-
   useEffect(() => {
     if (!memberAggregate || !onSummaryChange) return;
     onSummaryChange(memberAggregate);
   }, [memberAggregate, onSummaryChange]);
 
-  /* UPI & QR generation using qrcode lib */
   const upiId = isRecord(groupObj)
     ? toStr(
         groupObj.upiId ??
@@ -897,6 +866,7 @@ function PaymentPanel({
           "7489988065@ibl",
       )
     : "7489988065@ibl";
+
   const payee = isRecord(groupObj)
     ? toStr(
         groupObj.name ??
@@ -911,9 +881,7 @@ function PaymentPanel({
       typeof amount === "number" && amount > 0
         ? String(amount)
         : "";
-    const noteStr = note
-      ? `&tn=${encodeURIComponent(note)}`
-      : "";
+    const noteStr = note ? `&tn=${encodeURIComponent(note)}` : "";
     return `upi://pay?pa=${encodeURIComponent(
       upiId,
     )}&pn=${encodeURIComponent(payee)}${
@@ -944,14 +912,14 @@ function PaymentPanel({
     };
   }, [showQr, upiPayload]);
 
-  function onFileChange(
+  const onFileChange = (
     e: React.ChangeEvent<HTMLInputElement>,
-  ) {
+  ) => {
     const f = e.target.files && e.target.files[0];
     setFile(f ?? null);
-  }
+  };
 
-  async function submitRequest() {
+  const submitRequest = async () => {
     setErr(null);
     if (!isRecord(groupObj)) {
       setErr("Group missing");
@@ -971,6 +939,7 @@ function PaymentPanel({
       setErr("Enter amount");
       return;
     }
+
     const maxPayNow = overdue.maxPayableIfClearNow;
     if (amount > maxPayNow) {
       setErr(
@@ -983,13 +952,13 @@ function PaymentPanel({
     try {
       const gid = toStr(
         (groupObj as { _id?: unknown; id?: unknown })._id ??
-          (groupObj as { _id?: unknown; id?: unknown })
-            .id ??
+          (groupObj as { _id?: unknown; id?: unknown }).id ??
           "",
       );
       const url = `/api/chitgroups/${encodeURIComponent(
         gid,
       )}/payments/request`;
+
       const fd = new FormData();
       fd.append("memberId", memberId);
       fd.append("amount", String(amount));
@@ -1000,7 +969,6 @@ function PaymentPanel({
       const allocationSummary: AllocationItem[] = [];
       let remainingToAllocate = amount;
 
-      // old months first
       for (const d of overdue.details) {
         if (remainingToAllocate <= 0) break;
         const totalForMonth = Math.round(
@@ -1019,7 +987,6 @@ function PaymentPanel({
         remainingToAllocate -= apply;
       }
 
-      // current month (principal + penalty if any)
       if (
         remainingToAllocate > 0 &&
         (monthlyRemaining > 0 ||
@@ -1041,23 +1008,17 @@ function PaymentPanel({
         remainingToAllocate -= apply;
       }
 
-      const allocationPlannedTotal = amount;
-      const allocationUnallocated = Math.max(
-        0,
-        remainingToAllocate,
-      );
-
       fd.append(
         "allocationSummary",
         JSON.stringify(allocationSummary),
       );
       fd.append(
         "allocationPlannedTotal",
-        String(allocationPlannedTotal),
+        String(amount),
       );
       fd.append(
         "allocationUnallocated",
-        String(allocationUnallocated),
+        String(Math.max(0, remainingToAllocate)),
       );
       if (file) fd.append("file", file);
 
@@ -1066,6 +1027,7 @@ function PaymentPanel({
         credentials: "include",
         body: fd,
       });
+
       const text = await res.text();
       let parsed: unknown = {};
       try {
@@ -1073,13 +1035,8 @@ function PaymentPanel({
       } catch {
         parsed = { raw: text };
       }
+
       if (!res.ok) {
-        // eslint-disable-next-line no-console
-        console.error(
-          "payment request failed:",
-          res.status,
-          text,
-        );
         if (isRecord(parsed)) {
           const msg =
             toStr(parsed.error) ||
@@ -1087,14 +1044,9 @@ function PaymentPanel({
             res.statusText;
           throw new Error(msg);
         }
-        const rawText =
-          isRecord(parsed) && typeof parsed.raw === "string"
-            ? parsed.raw
-            : res.statusText;
-        throw new Error(rawText);
+        throw new Error(res.statusText);
       }
 
-      // refetch payments
       const pUrl = `/api/chitgroups/${encodeURIComponent(
         gid,
       )}/payments?memberId=${encodeURIComponent(
@@ -1103,7 +1055,7 @@ function PaymentPanel({
       const pr = await fetch(pUrl, {
         credentials: "include",
       });
-      const pj = await pr.json().catch(() => [] as unknown);
+      const pj: unknown = await pr.json().catch(() => []);
       const arr: unknown[] = Array.isArray(pj)
         ? pj
         : isRecord(pj) && Array.isArray(pj.payments)
@@ -1124,26 +1076,25 @@ function PaymentPanel({
     } finally {
       setSubmitting(false);
     }
-  }
+  };
 
-  function fillFull() {
+  const fillFull = () => {
     setAmount(overdue.maxPayableIfClearNow);
     setShowQr(true);
-  }
+  };
 
   const inputsDisabled =
     !canPayThisMonth || submitting || loading;
 
   return (
-    <div className="bg-[var(--bg-main)] p-1 sm:p-4 rounded-xl border space-y-3 w-70 sm:w-auto">
+    <div className="bg-[var(--bg-main)] p-2 sm:p-4 rounded-xl border space-y-3 w-full">
       <div className="flex items-center justify-between">
         <div className="text-sm font-medium text-gray-700">
           Your due this month
         </div>
         {!canPayThisMonth && (
           <div className="text-[11px] text-amber-600 text-right">
-            Auction winner not finalised for this month yet.
-            Payments will open after admin runs the auction.
+            Auction winner not finalised for this month yet. Payments will open after admin runs the auction.
           </div>
         )}
       </div>
@@ -1176,6 +1127,16 @@ function PaymentPanel({
             ₹{monthlyRemaining.toLocaleString()}
           </div>
         </div>
+        {myWinningPayout > 0 && (
+          <div>
+            <div className="text-xs text-gray-500">
+              This month payout (winner)
+            </div>
+            <div className="text-lg font-semibold text-emerald-600">
+              ₹{myWinningPayout.toLocaleString()}
+            </div>
+          </div>
+        )}
       </div>
 
       {(overdue.totalRem > 0 ||
@@ -1208,8 +1169,7 @@ function PaymentPanel({
           </div>
           <div>
             <span className="font-medium">
-              Max payable now (overdue + penalty + this
-              month):
+              Max payable now (overdue + penalty + this month):
             </span>{" "}
             ₹{overdue.maxPayableIfClearNow.toLocaleString()}
           </div>
@@ -1368,10 +1328,7 @@ function PaymentPanel({
               </div>
               <div>{upiPayload}</div>
               <div className="mt-2 text-gray-500">
-                After paying, paste UTR or upload screenshot
-                and press Submit (admin approval required).
-                Allocation plan is sent with your request for
-                admin to apply.
+                After paying, paste UTR or upload screenshot and press Submit (admin approval required).
               </div>
             </div>
           </div>
@@ -1388,9 +1345,9 @@ function PaymentPanel({
             <thead className="sticky top-0 bg-gray-50">
               <tr className="text-gray-500">
                 <th className="p-2">Month</th>
-                <th className="p-2">Principal paid</th>
-                <th className="p-2">Penalty paid</th>
-                <th className="p-2">Total paid</th>
+                <th className="p-2">Principal</th>
+                <th className="p-2">Penalty</th>
+                <th className="p-2">Total</th>
                 <th className="p-2">Remaining</th>
                 <th className="p-2">Status</th>
                 <th className="p-2">Details</th>
@@ -1401,11 +1358,11 @@ function PaymentPanel({
                 <tr key={m.idx} className="border-t">
                   <td className="p-2">
                     {m.label}{" "}
-                    {m.idx === curMonth ? (
+                    {m.idx === curMonth && (
                       <span className="text-[11px] text-gray-400">
                         (current)
                       </span>
-                    ) : null}
+                    )}
                   </td>
                   <td className="p-2">
                     ₹{Math.round(m.paid).toLocaleString()}
@@ -1436,7 +1393,7 @@ function PaymentPanel({
                     </span>
                   </td>
                   <td className="p-2 text-[11px] text-gray-600">
-                    {m.details && m.details.length ? (
+                    {m.details.length ? (
                       m.details.map((d, i) => (
                         <div key={`${m.idx}-${i}`}>
                           ₹
@@ -1485,12 +1442,17 @@ function PaymentPanel({
   );
 }
 
-/* ---------- main component ---------- */
+/* ---------- main: UserActiveFunds ---------- */
+
 export default function UserActiveFunds() {
+  const dispatch = useDispatch<AppDispatch>();
+
   const [q, setQ] = useState("");
-  const groups = useSelector(
-    (s: RootState) => s.chitGroups?.groups ?? [],
-  ) as unknown[];
+  const [openGroupId, setOpenGroupId] = useState<string | null>(null);
+
+  const chitGroupsState = useSelector(
+    (s: RootState) => s.chitGroups,
+  );
   const joined = useSelector(
     (s: RootState) => s.userChit?.joinedIds,
   ) as unknown[] | undefined;
@@ -1498,10 +1460,39 @@ export default function UserActiveFunds() {
     (s: RootState) => s.auth?.member,
   ) as unknown | undefined;
 
+  const { groupsRaw, groupsStatus } = useMemo(() => {
+    if (!chitGroupsState || !isRecord(chitGroupsState)) {
+      return {
+        groupsRaw: [] as unknown[],
+        groupsStatus: "idle",
+      };
+    }
+    const rawGroups = Array.isArray(chitGroupsState.groups)
+      ? chitGroupsState.groups
+      : [];
+    const status =
+      typeof chitGroupsState.status === "string"
+        ? chitGroupsState.status
+        : "idle";
+    return {
+      groupsRaw: rawGroups as unknown[],
+      groupsStatus: status,
+    };
+  }, [chitGroupsState]);
+
   const safeGroups = useMemo<unknown[]>(
-    () => (Array.isArray(groups) ? groups : []),
-    [groups],
+    () => (Array.isArray(groupsRaw) ? groupsRaw : []),
+    [groupsRaw],
   );
+
+  const isLoadingFunds =
+    groupsStatus === "idle" || groupsStatus === "loading";
+
+  useEffect(() => {
+    if (groupsStatus === "idle") {
+      dispatch(fetchGroups());
+    }
+  }, [dispatch, groupsStatus]);
 
   const authId =
     isRecord(auth) && (auth._id || auth.id || auth.memberId)
@@ -1558,7 +1549,6 @@ export default function UserActiveFunds() {
         ? override.pending
         : Math.max(0, totalAmount - collectedAmount);
 
-      // dates + installments
       const startDateStr = toStr(groupRecord.startDate ?? "");
 
       const numberOfInstallmentsRaw = toNum(
@@ -1673,6 +1663,10 @@ export default function UserActiveFunds() {
         ? "bg-blue-100 text-blue-800"
         : "bg-gray-100 text-gray-800";
 
+  const toggleOpen = (id: string) => {
+    setOpenGroupId((prev) => (prev === id ? null : id));
+  };
+
   return (
     <div className="space-y-6 p-1 sm:p-4 bg-[var(--bg-main)] min-h-screen">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1726,6 +1720,9 @@ export default function UserActiveFunds() {
               const gid = toStr(g._id ?? g.id ?? "");
               return gid === f.id;
             });
+
+            const isOpen = openGroupId === f.id;
+
             return (
               <motion.div
                 key={f.id}
@@ -1736,7 +1733,6 @@ export default function UserActiveFunds() {
               >
                 <Card className="shadow-sm border overflow-hidden">
                   <CardContent className="p-4 space-y-4">
-                    {/* top summary row */}
                     <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                       <div className="flex-1 space-y-2">
                         <div className="flex items-center justify-between gap-2">
@@ -1828,100 +1824,121 @@ export default function UserActiveFunds() {
                           </div>
                         </div>
                       </div>
+
+                      <button
+                        type="button"
+                        onClick={() => toggleOpen(f.id)}
+                        className="mt-2 md:mt-0 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border text-xs font-medium bg-white hover:bg-gray-50"
+                      >
+                        {isOpen ? (
+                          <>
+                            Hide details
+                            <ChevronUp className="w-4 h-4" />
+                          </>
+                        ) : (
+                          <>
+                            View bids & payments
+                            <ChevronDown className="w-4 h-4" />
+                          </>
+                        )}
+                      </button>
                     </div>
 
-                    {/* second row: bid panel + payment/summary table */}
-                    <div className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-                      <div className="space-y-3">
-                        {grp && isRecord(grp) ? (
-                          (() => {
-                            const chitGroup = grp as ChitGroup;
-                            const chitId = idStr(
-                              (chitGroup as {
-                                _id?: unknown;
-                                id?: unknown;
-                              })._id ??
+                    {isOpen && (
+                      <div className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                        <div className="space-y-3">
+                          {grp && isRecord(grp) ? (
+                            (() => {
+                              const chitGroup = grp as ChitGroup;
+                              const chitId = idStr(
                                 (chitGroup as {
                                   _id?: unknown;
                                   id?: unknown;
-                                }).id ??
-                                chitGroup,
-                            );
-                            const start = toStr(
-                              (chitGroup as {
-                                startDate?: unknown;
-                              }).startDate ?? "",
-                            );
-                            const currentMonthIndex =
-                              monthsElapsedSinceStart(start);
-
-                            const rawBiddingOpen = (
-                              chitGroup as {
-                                biddingOpen?: unknown;
-                              }
-                            ).biddingOpen;
-                            const rawBiddingMonth = (
-                              chitGroup as {
-                                biddingMonthIndex?: unknown;
-                              }
-                            ).biddingMonthIndex;
-
-                            const biddingMonth =
-                              typeof rawBiddingMonth ===
-                                "number" &&
-                              !Number.isNaN(rawBiddingMonth)
-                                ? Math.max(
-                                    1,
-                                    Math.round(
-                                      rawBiddingMonth,
-                                    ),
-                                  )
-                                : currentMonthIndex;
-
-                            const isBiddingOpen =
-                              rawBiddingOpen === true &&
-                              biddingMonth ===
-                                currentMonthIndex;
-
-                            const chitValue = toNum(
-                              (chitGroup as {
-                                chitValue?: unknown;
-                              }).chitValue ??
+                                })._id ??
+                                  (chitGroup as {
+                                    _id?: unknown;
+                                    id?: unknown;
+                                  }).id ??
+                                  chitGroup,
+                              );
+                              const start = toStr(
                                 (chitGroup as {
-                                  totalAmount?: unknown;
-                                }).totalAmount ??
-                                0,
-                            );
+                                  startDate?: unknown;
+                                }).startDate ?? "",
+                              );
+                              const currentMonthIndex =
+                                monthsElapsedSinceStart(start);
 
-                            return (
-                              <BidPanel
-                                chitId={chitId}
-                                memberId={authId}
-                                chitValue={chitValue}
-                                isBiddingOpen={
-                                  isBiddingOpen
+                              const rawBiddingOpen = (
+                                chitGroup as {
+                                  biddingOpen?: unknown;
                                 }
-                                currentMonthIndex={
-                                  currentMonthIndex
+                              ).biddingOpen;
+                              const rawBiddingMonth = (
+                                chitGroup as {
+                                  biddingMonthIndex?: unknown;
                                 }
-                              />
-                            );
-                          })()
-                        ) : (
-                          <div className="text-sm text-gray-500">
-                            Bid panel unavailable.
-                          </div>
-                        )}
+                              ).biddingMonthIndex;
+
+                              const biddingMonth =
+                                typeof rawBiddingMonth ===
+                                  "number" &&
+                                Number.isFinite(
+                                  rawBiddingMonth,
+                                )
+                                  ? Math.max(
+                                      1,
+                                      Math.round(
+                                        rawBiddingMonth,
+                                      ),
+                                    )
+                                  : currentMonthIndex;
+
+                              const isBiddingOpen =
+                                rawBiddingOpen === true &&
+                                biddingMonth ===
+                                  currentMonthIndex;
+
+                              const chitValue = toNum(
+                                (chitGroup as {
+                                  chitValue?: unknown;
+                                }).chitValue ??
+                                  (chitGroup as {
+                                    totalAmount?: unknown;
+                                  }).totalAmount ??
+                                  0,
+                              );
+
+                              return (
+                                <BidPanel
+                                  chitId={chitId}
+                                  memberId={authId}
+                                  chitValue={chitValue}
+                                  isBiddingOpen={
+                                    isBiddingOpen
+                                  }
+                                  currentMonthIndex={
+                                    currentMonthIndex
+                                  }
+                                />
+                              );
+                            })()
+                          ) : (
+                            <div className="text-sm text-gray-500">
+                              Bid panel unavailable.
+                            </div>
+                          )}
+                        </div>
+
+                        <PaymentPanel
+                          groupObj={grp ?? {}}
+                          memberId={authId}
+                          onSummaryChange={
+                            handleMemberSummaryChange
+                          }
+                        />
                       </div>
-
-                      <PaymentPanel
-                        groupObj={grp ?? {}}
-                        memberId={authId}
-                        onSummaryChange={
-                          handleMemberSummaryChange
-                        }
-                      />
-                    </div>
+                    )}
                   </CardContent>
                 </Card>
               </motion.div>
@@ -1929,7 +1946,13 @@ export default function UserActiveFunds() {
           })}
         </AnimatePresence>
 
-        {filtered.length === 0 && (
+        {isLoadingFunds && (
+          <div className="text-center text-gray-500 mt-4 text-sm">
+            Loading your funds...
+          </div>
+        )}
+
+        {!isLoadingFunds && filtered.length === 0 && (
           <div className="text-center text-gray-500 mt-4 text-sm">
             You have no active chit funds joined.
           </div>

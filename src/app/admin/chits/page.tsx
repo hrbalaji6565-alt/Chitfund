@@ -46,10 +46,10 @@ type BidRow = {
 
 type AuctionDisplay = {
   winningMemberId: string;
-  winningDiscount: number; // total discount offered by winner (rupees)
-  winningPayout: number; // payout amount to winner this month
+  winningDiscount: number;
+  winningPayout: number;
   distributedToMembers: Array<{ memberId: string; amount: number }>;
-  perMemberDiscount?: number; // how much monthly installment reduced per member this month
+  perMemberDiscount?: number;
   adminCommissionAmount?: number;
   totalPot?: number;
   winningBidAmount?: number;
@@ -246,7 +246,14 @@ function AdminChitsPage() {
 
   const [biddingOpen, setBiddingOpen] = useState(false);
   const [auctionRunning, setAuctionRunning] = useState(false);
-  const [biddingStatusMsg, setBiddingStatusMsg] = useState<string | null>(null);
+  const [biddingStatusMsg, setBiddingStatusMsg] = useState<string | null>(
+    null,
+  );
+
+  // NEW: manual bid state for admin
+  const [manualBidMemberId, setManualBidMemberId] = useState<string>("");
+  const [manualBidAmount, setManualBidAmount] = useState<number | "">("");
+  const [manualBidSubmitting, setManualBidSubmitting] = useState(false);
 
   const membersSnapshotRef = useRef<string | null>(null);
   useEffect(() => {
@@ -322,6 +329,8 @@ function AdminChitsPage() {
     setLoading(true);
     setBiddingOpen(false);
     setBiddingStatusMsg(null);
+    setManualBidMemberId("");
+    setManualBidAmount("");
 
     const group = (groups ?? []).find(
       (g) => String(g._id ?? g.id) === groupId,
@@ -640,6 +649,20 @@ function AdminChitsPage() {
         ? computeMetaFromGroup(group, monthlyCollected).expectedMonthlyTotal
         : 0;
 
+      // total members for per-member discount calculation
+      const totalMembersCount =
+        group != null
+          ? Math.max(
+              1,
+              safeNum(
+                group.totalMembers ??
+                  (Array.isArray(group.members)
+                    ? (group.members as unknown[]).length
+                    : 0),
+              ),
+            )
+          : 0;
+
       if (auctionRaw) {
         const arc = auctionRaw;
 
@@ -649,48 +672,57 @@ function AdminChitsPage() {
             arc.winner ??
             "NO_WINNER",
         );
- let winningBidAmount = safeNum(
+
+        let winningBidAmount = safeNum(
           (arc as { winningBidAmount?: unknown }).winningBidAmount ??
             (arc as { totalBidAmount?: unknown }).totalBidAmount ??
             (arc as { bidAmount?: unknown }).bidAmount ??
             0,
         );
+
         let winningDiscount = safeNum(
           (arc as { winningDiscount?: unknown }).winningDiscount ??
             (arc as { discountOffered?: unknown }).discountOffered ??
             0,
         );
 
-       let winningPayout = safeNum(
-          (arc as { winningPayout?: unknown }).winningPayout,
-        );
-        if (!winningPayout && baseExpectedMonthlyTotal > 0) {
-          winningPayout =
-            winningDiscount > 0
-              ? Math.max(0, baseExpectedMonthlyTotal - winningDiscount)
-              : baseExpectedMonthlyTotal;
-        }
-
-        const totalPot = safeNum(
-          (arc as { totalPot?: unknown }).totalPot ?? baseExpectedMonthlyTotal,
-        );
-
         let adminCommissionAmount = safeNum(
           (arc as { adminCommissionAmount?: unknown }).adminCommissionAmount,
         );
-        if (!adminCommissionAmount && baseExpectedMonthlyTotal > 0) {
-          adminCommissionAmount = Math.round(baseExpectedMonthlyTotal * 0.04);
+        let totalPot = safeNum(
+          (arc as { totalPot?: unknown }).totalPot ??
+            baseExpectedMonthlyTotal,
+        );
+
+        if (!totalPot && baseExpectedMonthlyTotal > 0) {
+          totalPot = baseExpectedMonthlyTotal;
         }
-         if (!winningDiscount && winningBidAmount > 0 && baseExpectedMonthlyTotal > 0) {
-          const diff =
-            winningBidAmount ;
+
+        if (!adminCommissionAmount && totalPot > 0) {
+          adminCommissionAmount = Math.round(totalPot * 0.04);
+        }
+
+        // if discount missing but bidAmount present, derive discount
+        if (!winningDiscount && winningBidAmount > 0 && totalPot > 0) {
+          const basePlusAdmin = totalPot + adminCommissionAmount;
+          const diff = winningBidAmount - basePlusAdmin;
           winningDiscount = diff > 0 ? diff : 0;
         }
-        if (!winningBidAmount && baseExpectedMonthlyTotal > 0) {
-          winningBidAmount =
-            baseExpectedMonthlyTotal + adminCommissionAmount + winningDiscount;
+
+        // if bidAmount missing but others present, reconstruct
+        if (!winningBidAmount && totalPot > 0) {
+          winningBidAmount = totalPot + adminCommissionAmount + winningDiscount;
         }
-        
+
+        let winningPayout = safeNum(
+          (arc as { winningPayout?: unknown }).winningPayout,
+        );
+        if (!winningPayout && totalPot > 0) {
+          winningPayout = Math.max(
+            0,
+            totalPot - winningDiscount - adminCommissionAmount,
+          );
+        }
 
         const distributedToMembers: Array<{
           memberId: string;
@@ -723,15 +755,25 @@ function AdminChitsPage() {
               : undefined;
         }
 
+        if (
+          (!perMemberDiscount || perMemberDiscount <= 0) &&
+          winningDiscount > 0 &&
+          totalMembersCount > 0
+        ) {
+          perMemberDiscount = Math.round(
+            winningDiscount / totalMembersCount,
+          );
+        }
+
         auctionDisplay = {
           winningMemberId,
-          winningDiscount,        // e.g. 10,000
-          winningPayout,          // e.g. 90,000
+          winningDiscount,
+          winningPayout,
           distributedToMembers,
           perMemberDiscount,
-          adminCommissionAmount,  // e.g. 4,000
-          totalPot,               // base pot (1,00,000)
-          winningBidAmount,       // full bid (1,14,000)
+          adminCommissionAmount,
+          totalPot,
+          winningBidAmount,
         };
       }
 
@@ -753,7 +795,8 @@ function AdminChitsPage() {
           ...baseMeta,
           perMemberInstallment: Math.max(
             0,
-            baseMeta.perMemberInstallment - auctionDisplay.perMemberDiscount,
+            baseMeta.perMemberInstallment -
+              auctionDisplay.perMemberDiscount,
           ),
         };
       }
@@ -790,6 +833,9 @@ function AdminChitsPage() {
     setBiddingOpen(false);
     setBiddingStatusMsg(null);
     setAuctionRunning(false);
+    setManualBidMemberId("");
+    setManualBidAmount("");
+    setManualBidSubmitting(false);
   };
 
   const handleStartBidding = async () => {
@@ -908,12 +954,112 @@ function AdminChitsPage() {
       await fetchPaymentsForGroup(openGroupId);
       setBiddingOpen(false);
       setBiddingStatusMsg("Auction completed for this month.");
-      // eslint-disable-next-line no-console
-      console.log("Auction completed, winner calculated.");
     } catch (err) {
       setErrorText(err instanceof Error ? err.message : String(err));
     } finally {
       setAuctionRunning(false);
+    }
+  };
+
+  // NEW: admin manual bid on behalf of a user
+  const handleSubmitManualBid = async () => {
+    if (!openGroupId || !meta) return;
+
+    if (!biddingOpen) {
+      setErrorText("Bidding must be open to place a manual bid.");
+      return;
+    }
+
+    if (!manualBidMemberId) {
+      setErrorText("Select a member for manual bid.");
+      return;
+    }
+
+    if (typeof manualBidAmount !== "number" || manualBidAmount <= 0) {
+      setErrorText("Enter a valid manual bid amount.");
+      return;
+    }
+
+    const basePot =
+      meta.expectedMonthlyTotal || auction?.totalPot || 0;
+    const adminCommission =
+      auction?.adminCommissionAmount ?? Math.round(basePot * 0.04);
+    const minBid = basePot + adminCommission;
+
+    if (manualBidAmount < minBid) {
+      setErrorText(
+        `Manual bid must be at least ₹${fmt(minBid)} (pot + admin commission).`,
+      );
+      return;
+    }
+
+    const currentTopDiscount = bids.length
+      ? bids.reduce(
+          (max, b) =>
+            b.discountOffered > max ? b.discountOffered : max,
+          0,
+        )
+      : 0;
+
+    const manualDiscount = manualBidAmount - minBid;
+
+    if (manualDiscount <= 0) {
+      setErrorText(
+        "Manual bid must include some discount for members above (pot + admin commission).",
+      );
+      return;
+    }
+
+    if (manualDiscount <= currentTopDiscount) {
+      setErrorText(
+        `Manual bid discount (₹${fmt(
+          manualDiscount,
+        )}) must be higher than current highest discount ₹${fmt(
+          currentTopDiscount,
+        )}.`,
+      );
+      return;
+    }
+
+    setManualBidSubmitting(true);
+    setErrorText(null);
+
+    try {
+      const res = await fetch(
+        `/api/chitgroups/${encodeURIComponent(openGroupId)}/bids`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            memberId: manualBidMemberId,
+            bidAmount: manualBidAmount,
+            monthIndex: meta.currentMonthIndex,
+            placedByAdmin: true,
+          }),
+        },
+      );
+
+      const json: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = isRecord(json)
+          ? String(
+              (json as { error?: unknown }).error ??
+                (json as { message?: unknown }).message ??
+                res.statusText,
+            )
+          : res.statusText;
+        throw new Error(msg);
+      }
+
+      // refresh data so bids and breakdown update
+      await fetchPaymentsForGroup(openGroupId);
+      setManualBidAmount("");
+      setManualBidMemberId("");
+    } catch (err) {
+      setErrorText(err instanceof Error ? err.message : String(err));
+    } finally {
+      setManualBidSubmitting(false);
     }
   };
 
@@ -1381,6 +1527,119 @@ function AdminChitsPage() {
                     : "Bidding is CLOSED (members cannot bid if you block it on member UI)"}
                 </div>
               </div>
+
+              {/* NEW: manual bid form for admin */}
+              <div className="mb-3 border rounded-md p-2 bg-[var(--bg-main)]/40">
+                <div className="text-xs font-semibold mb-1">
+                  Place manual bid on behalf of a member
+                </div>
+                <div className="flex flex-col gap-2 md:flex-row md:items-end">
+                  <div className="flex-1">
+                    <label className="block text-[11px] text-gray-600 mb-1">
+                      Member
+                    </label>
+                    <select
+                      value={manualBidMemberId}
+                      onChange={(e) =>
+                        setManualBidMemberId(e.target.value)
+                      }
+                      className="w-full border rounded px-2 py-1 text-xs"
+                    >
+                      <option value="">Select member</option>
+                      {(() => {
+                        const groupObj = getGroupById(openGroupId);
+                        const memberIdsSet = new Set<string>();
+
+                        if (groupObj && Array.isArray(groupObj.members)) {
+                          for (const m of groupObj.members as unknown[]) {
+                            if (typeof m === "string") {
+                              memberIdsSet.add(m);
+                            } else if (isRecord(m)) {
+                              memberIdsSet.add(
+                                String(m._id ?? m.id ?? "UNKNOWN"),
+                              );
+                            }
+                          }
+                        }
+
+                        for (const mid of paymentsMatrix.keys()) {
+                          memberIdsSet.add(mid);
+                        }
+
+                        return Array.from(memberIdsSet)
+                          .map((mid) => ({
+                            id: mid,
+                            name: memberNamesMap[mid] ?? mid,
+                          }))
+                          .sort((a, b) =>
+                            a.name.toLowerCase().localeCompare(
+                              b.name.toLowerCase(),
+                            ),
+                          )
+                          .map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name}
+                            </option>
+                          ));
+                      })()}
+                    </select>
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-[11px] text-gray-600 mb-1">
+                      Total bid amount (pot + admin + discount)
+                    </label>
+                    <input
+                      type="number"
+                      className="w-full border rounded px-2 py-1 text-xs"
+                      value={
+                        typeof manualBidAmount === "number"
+                          ? manualBidAmount
+                          : ""
+                      }
+                      onChange={(e) => {
+                        const value = e.target.value.trim();
+                        if (!value) {
+                          setManualBidAmount("");
+                          return;
+                        }
+                        const n = Number(value);
+                        if (Number.isNaN(n)) return;
+                        setManualBidAmount(n);
+                      }}
+                      disabled={!biddingOpen || manualBidSubmitting}
+                      placeholder="Enter final bid amount e.g. 110000"
+                    />
+                    {meta && (
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Pot: ₹{fmt(meta.expectedMonthlyTotal)} • Admin
+                        (≈4%): ₹
+                        {fmt(
+                          auction?.adminCommissionAmount ??
+                            Math.round(
+                              meta.expectedMonthlyTotal * 0.04,
+                            ),
+                        )}
+                      </p>
+                    )}
+                  </div>
+                  <div className="md:w-auto">
+                    <Button
+                      className="mt-1 md:mt-0 h-8 px-3 text-xs"
+                      onClick={handleSubmitManualBid}
+                      disabled={
+                        !biddingOpen || manualBidSubmitting || loading
+                      }
+                    >
+                      {manualBidSubmitting ? "Saving..." : "Place manual bid"}
+                    </Button>
+                  </div>
+                </div>
+                <p className="mt-1 text-[11px] text-gray-500">
+                  Use this when member is not online and informs you on call
+                  what bid to place.
+                </p>
+              </div>
+
               {bids.length === 0 ? (
                 <div className="text-sm text-gray-500">
                   No bids placed yet.
@@ -1430,7 +1689,7 @@ function AdminChitsPage() {
                   No auction run yet.
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <div className="p-3 bg-[var(--bg-main)] rounded flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <div className="text-xs text-gray-500">
@@ -1442,7 +1701,7 @@ function AdminChitsPage() {
                     </div>
                     <div>
                       <div className="text-xs text-gray-500">
-                        Winning discount
+                        Winning discount (for members)
                       </div>
                       <div className="font-semibold">
                         ₹{fmt(auction.winningDiscount)}
@@ -1464,7 +1723,8 @@ function AdminChitsPage() {
                         ₹{fmt(auction.winningPayout)}
                       </div>
                     </div>
-                    {/* {typeof auction.adminCommissionAmount === "number" && (
+                    {typeof auction.adminCommissionAmount ===
+                      "number" && (
                       <div>
                         <div className="text-xs text-gray-500">
                           Admin commission
@@ -1473,8 +1733,76 @@ function AdminChitsPage() {
                           ₹{fmt(auction.adminCommissionAmount)}
                         </div>
                       </div>
-                    )} */}
+                    )}
                   </div>
+
+                  {/* NEW: breakdown like your 1,00,000 / 1,10,000 example */}
+                  <div className="p-3 border rounded-md bg-[var(--bg-main)]/40 text-xs space-y-1.5">
+                    <div className="font-semibold">
+                      Monthly breakdown
+                    </div>
+                    <div>
+                      Fund pot this month:{" "}
+                      <span className="font-semibold">
+                        ₹{fmt(
+                          auction.totalPot ??
+                            meta.expectedMonthlyTotal,
+                        )}
+                      </span>
+                    </div>
+                    <div>
+                      Total members:{" "}
+                      <span className="font-semibold">
+                        {meta.totalMembers}
+                      </span>
+                    </div>
+                    <div>
+                      Final bid amount:{" "}
+                      <span className="font-semibold">
+                        ₹{fmt(auction.winningBidAmount ?? 0)}
+                      </span>
+                    </div>
+                    <div>
+                      Admin commission (~4% of pot):{" "}
+                      <span className="font-semibold">
+                        ₹{fmt(
+                          auction.adminCommissionAmount ??
+                            Math.round(
+                              (auction.totalPot ??
+                                meta.expectedMonthlyTotal) * 0.04,
+                            ),
+                        )}
+                      </span>
+                    </div>
+                    <div>
+                      Total discount for members:{" "}
+                      <span className="font-semibold">
+                        ₹{fmt(auction.winningDiscount)}
+                      </span>
+                    </div>
+                    <div>
+                      Per-member discount this month:{" "}
+                      <span className="font-semibold">
+                        ₹{fmt(
+                          auction.perMemberDiscount ??
+                            (auction.winningDiscount > 0 &&
+                            meta.totalMembers > 0
+                              ? Math.round(
+                                  auction.winningDiscount /
+                                    meta.totalMembers,
+                                )
+                              : 0),
+                        )}
+                      </span>
+                    </div>
+                    <div>
+                      Net payout to winner (pot − discount − admin):{" "}
+                      <span className="font-semibold">
+                        ₹{fmt(auction.winningPayout)}
+                      </span>
+                    </div>
+                  </div>
+
                   <div>
                     <div className="text-sm font-medium">
                       Distribution of discount

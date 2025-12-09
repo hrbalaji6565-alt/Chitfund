@@ -759,9 +759,7 @@ export default function ReportsPage() {
                 <h3 className="text-3xl font-bold text-white">
                   {metric.value}
                 </h3>
-                <p className="text-xs mt-1 flex items-center gap-1 text-white">
-                  <TrendingUp className="w-3 h-3" /> +12.5%
-                </p>
+              
               </div>
               <div className="bg-white p-4 rounded-2xl">
                 {metric.icon}
