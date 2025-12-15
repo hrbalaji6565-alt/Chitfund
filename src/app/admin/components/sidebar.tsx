@@ -19,6 +19,7 @@ import type { AppDispatch } from "@/store/store";
 import { useDispatch } from "react-redux";
 import { toast } from "react-hot-toast";
 import { logoutMember } from "@/store/memberAuthSlice";
+import { logout } from "@/store/adminSlice";
 const Sidebar: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const sidebarRef = useRef<HTMLDivElement | null>(null);
@@ -45,20 +46,12 @@ const Sidebar: React.FC = () => {
   }`;
   
     const dispatch = useDispatch<AppDispatch>();
-      const handleLogout = async () => {
-          try {
-            await dispatch(logoutMember()).unwrap();
-          } catch {
-            // continue cleaning client state even if logout request failed
-          }
-          try {
-            localStorage.removeItem("member");
-            localStorage.removeItem("adminToken");
-          } catch {}
-          toast.success("Logged out successfully!");
-          // go to unified auth page (root). middleware will prevent /user access afterward.
-          router.replace("/");
-        };
+        const handleLogout = () => {
+        dispatch(logout());
+        localStorage.removeItem("adminToken");
+        toast.success("Logged out successfully!");
+        router.push("/");
+      };
 
   const links = [
     { href: "/admin", label: "Dashboard", icon: <LayoutDashboard size={16} /> },
@@ -94,7 +87,7 @@ const Sidebar: React.FC = () => {
       </div>
 
       <div>
-        <button className="flex items-center gap-2 px-3 py-2 w-full text-[var(--color-primary)] hover:bg-[var(--bg-highlight)] rounded-md transition-all duration-200">
+        <button onClick={() => handleLogout()} className="flex items-center gap-2 px-3 py-2 w-full text-[var(--color-primary)] hover:bg-[var(--bg-highlight)] rounded-md transition-all duration-200">
           <LogOut size={16} />
           Logout
         </button>
