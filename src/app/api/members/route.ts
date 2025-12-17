@@ -9,7 +9,7 @@ import mongoose from "mongoose";
 type CreateBody = {
   name: string;
   mobile: string;
-  email: string;
+ userId: string;
   password: string;
   joiningDate?: string;
   address?: string;
@@ -90,18 +90,18 @@ export async function POST(req: Request) {
     const body = raw as Record<string, unknown>;
 
     const name = toString(body.name) ?? "";
-    const email = toString(body.email) ?? "";
+    const userId = toString(body.userId) ?? "";
     const password = toString(body.password) ?? "";
     const mobile = toString(body.mobile) ?? "";
 
-    if (!name || !email || !password || !mobile) {
-      return NextResponse.json({ success: false, message: "name, email, mobile and password are required" }, { status: 400 });
+    if (!name || !userId || !password || !mobile) {
+      return NextResponse.json({ success: false, message: "name, userId, mobile and password are required" }, { status: 400 });
     }
 
     await dbConnect();
 
-    const exists = await Member.findOne({ email }).lean();
-    if (exists) return NextResponse.json({ success: false, message: "Email already registered" }, { status: 409 });
+    const exists = await Member.findOne({ userId }).lean();
+    if (exists) return NextResponse.json({ success: false, message: "userId already registered" }, { status: 409 });
 
     const salt = await bcrypt.genSalt(10);
     const hashed = await bcrypt.hash(password, salt);
@@ -133,7 +133,7 @@ export async function POST(req: Request) {
     const memberData: Partial<IMember> = {
       name,
       mobile,
-      email,
+      userId,
       password: hashed,
       joiningDate: body.joiningDate ? new Date(String(body.joiningDate)) : undefined,
       address: typeof body.address === "string" ? body.address : undefined,

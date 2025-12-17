@@ -5,7 +5,7 @@ export type MemberStatus = "Active" | "Inactive";
 export interface IMember extends Document {
   name: string;
   mobile: string;
-  email: string;
+  userId: string; 
   password: string;
   joiningDate?: Date;
   address?: string;
@@ -32,7 +32,13 @@ const MemberSchema = new Schema<IMember>(
   {
     name: { type: String, required: true },
     mobile: { type: String, required: true },
-    email: { type: String, required: true, unique: true },
+    userId: {                     // ✅ NEW
+      type: String,
+      required: true,
+      unique: true,
+      index: true,
+      trim: true,
+    },
     password: { type: String, required: true },
     joiningDate: { type: Date },
     address: { type: String },

@@ -30,7 +30,7 @@ function isRecord(x: unknown): x is Record<string, unknown> {
 type UpdateBody = Partial<{
   name: string;
   mobile: string;
-  email: string;
+  userId: string;
   password: string;
   joiningDate: string;
   address: string;
@@ -99,7 +99,7 @@ export async function PUT(req: NextRequest, context: unknown) {
     // ---------- simple fields ----------
     if (body.name !== undefined) memberDoc.name = body.name as string;
     if (body.mobile !== undefined) memberDoc.mobile = body.mobile as string;
-    if (body.email !== undefined) memberDoc.email = body.email as string;
+    if (body.userId !== undefined) memberDoc.userId = body.userId as string;
     if (body.joiningDate !== undefined) memberDoc.joiningDate = body.joiningDate ? new Date(body.joiningDate) : undefined;
     if (body.address !== undefined) memberDoc.address = body.address as string;
     if (body.status !== undefined) memberDoc.status = body.status;

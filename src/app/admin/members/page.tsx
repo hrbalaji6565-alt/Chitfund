@@ -32,7 +32,7 @@ interface SubscriberLocal {
   _id?: string;
   name: string;
   mobile: string;
-  email: string;
+  userId: string;
   address?: string;
   joiningDate?: string;
   status: "Active" | "Inactive";
@@ -58,7 +58,7 @@ const initialLocalSample: SubscriberLocal = {
   id: 1,
   name: "Rajesh Kumar",
   mobile: "+91 98765 43210",
-  email: "rajesh.kumar@email.com",
+  userId: "rajesh.kumar@email.com",
   address: "123 MG Road, Bangalore",
   joiningDate: "2024-01-01",
   status: "Active",
@@ -144,7 +144,7 @@ export default function SubscribersPage() {
   const emptyForm: Partial<SubscriberLocal> = {
     name: "",
     mobile: "",
-    email: "",
+    userId: "",
     address: "",
     joiningDate: "",
     status: "Active",
@@ -181,7 +181,7 @@ export default function SubscribersPage() {
         id: idx + 1,
         name: (mRec.name as string) || "",
         mobile: (mRec.mobile as string) || "",
-        email: (mRec.email as string) || "",
+        userId: (mRec.userId as string) || "",
         address: (mRec.address as string) || "",
         joiningDate: mRec.joiningDate ? String(mRec.joiningDate).split("T")[0] : "",
         status: ((mRec.status as "Active" | "Inactive") || "Active") as "Active" | "Inactive",
@@ -203,7 +203,7 @@ export default function SubscribersPage() {
     const matchesSearch =
       (s.name || "").toLowerCase().includes(search) ||
       (s.mobile || "").includes(searchTerm) ||
-      (s.email || "").toLowerCase().includes(search);
+      (s.userId || "").toLowerCase().includes(search);
     const matchesFilter = filterStatus === "all" || s.status === filterStatus;
     return matchesSearch && matchesFilter;
   });
@@ -224,7 +224,7 @@ export default function SubscribersPage() {
     const payload: Partial<Member> = {};
     if (formData.name) (payload as unknown as Record<string, unknown>).name = String(formData.name);
     if (formData.mobile) (payload as unknown as Record<string, unknown>).mobile = String(formData.mobile);
-    if (formData.email) (payload as unknown as Record<string, unknown>).email = String(formData.email);
+    if (formData.userId) (payload as unknown as Record<string, unknown>).userId = String(formData.userId);
     if (formData.address) (payload as unknown as Record<string, unknown>).address = String(formData.address);
     if (formData.joiningDate) (payload as unknown as Record<string, unknown>).joiningDate = String(formData.joiningDate);
     if (formData.status) (payload as unknown as Record<string, unknown>).status = formData.status;
@@ -272,10 +272,6 @@ export default function SubscribersPage() {
   // CREATE
   const handleAddSubscriber = async () => {
     try {
-      if (!formData.aadhaarImage) {
-        setToastMsg({ text: "Aadhaar image is required", type: "error" });
-        return;
-      }
       setIsSubmitting(true);
       const payload = buildPayloadFromForm();
       await dispatch(createMember(payload)).unwrap();
@@ -299,7 +295,7 @@ export default function SubscribersPage() {
       _id: s._id,
       name: s.name,
       mobile: s.mobile,
-      email: s.email,
+      userId: s.userId,
       address: s.address,
       joiningDate: s.joiningDate,
       status: s.status,
@@ -387,12 +383,12 @@ export default function SubscribersPage() {
   };
 
   const fieldConfig = [
-    { label: "Full Name", key: "name", type: "text", placeholder: "John Doe" },
-    { label: "Mobile Number", key: "mobile", type: "text", placeholder: "+91 98765 43210" },
-    { label: "Email Address", key: "email", type: "email", placeholder: "john@email.com" },
-    { label: "Password (only for create or change)", key: "password", type: "password", placeholder: "********" },
-    { label: "Joining Date", key: "joiningDate", type: "date", placeholder: "" },
-  ];
+  { label: "Full Name", key: "name", type: "text", placeholder: "John Doe" },
+  { label: "User ID", key: "userId", type: "text", placeholder: "john123" }, // ✅
+  { label: "Password", key: "password", type: "password", placeholder: "********" },
+  { label: "Mobile Number", key: "mobile", type: "text", placeholder: "+91 9876543210" },
+  { label: "Joining Date", key: "joiningDate", type: "date", placeholder: "" },
+];
 
   return (
     <div className="space-y-6">
@@ -404,7 +400,7 @@ export default function SubscribersPage() {
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--text-secondary)]" />
             <Input
-              placeholder="Search by name, mobile, or email..."
+              placeholder="Search by name, mobile, or userID..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 h-12 rounded-xl bg-[var(--bg-card)] text-[var(--text-primary)] placeholder:text-[var(--text-secondary)]"
@@ -587,7 +583,7 @@ export default function SubscribersPage() {
                         </div>
                         <div>
                           <p className="font-medium">{s.name}</p>
-                          <p className="text-xs text-[var(--text-secondary)]">{s.email}</p>
+                          <p className="text-xs text-[var(--text-secondary)]">{s.userId}</p>
                         </div>
                       </div>
                     </td>
@@ -674,7 +670,7 @@ export default function SubscribersPage() {
 
                 <div className="text-center md:text-left">
                   <h3 className="text-lg font-semibold">{viewingSubscriber.name}</h3>
-                  <p className="text-sm text-[var(--text-secondary)]">{viewingSubscriber.email}</p>
+                  <p className="text-sm text-[var(--text-secondary)]">{viewingSubscriber.userId}</p>
                   <p className="text-sm text-[var(--text-secondary)]">{viewingSubscriber.mobile}</p>
                 </div>
 

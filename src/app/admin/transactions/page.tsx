@@ -133,20 +133,20 @@ const parseAllocationArray = (
 
     const principalPaid = toNumber(
       item.principalPaid ??
-        item.principal ??
-        item.prc ??
-        item.pr ??
-        item.amount ??
-        item.apply ??
-        0,
+      item.principal ??
+      item.prc ??
+      item.pr ??
+      item.amount ??
+      item.apply ??
+      0,
     );
 
     const penaltyPaid = toNumber(
       item.penaltyPaid ??
-        item.penalty ??
-        item.pen ??
-        item.penaltyApplied ??
-        0,
+      item.penalty ??
+      item.pen ??
+      item.penaltyApplied ??
+      0,
     );
 
     out.push({
@@ -211,23 +211,23 @@ function normalizePayment(
 
   const memberId = asOptString(
     r.memberId ??
-      (memberFromMeta ? memberFromMeta._id : undefined) ??
-      r.userId,
+    (memberFromMeta ? memberFromMeta._id : undefined) ??
+    r.userId,
   );
   const memberName = asOptString(
     r.memberName ??
-      (memberFromMeta ? memberFromMeta.name : undefined) ??
-      r.name,
+    (memberFromMeta ? memberFromMeta.name : undefined) ??
+    r.name,
   );
   const groupId = asOptString(
     r.groupId ??
-      (groupFromMeta ? groupFromMeta._id : undefined) ??
-      fallbackGroupId,
+    (groupFromMeta ? groupFromMeta._id : undefined) ??
+    fallbackGroupId,
   );
   const groupName = asOptString(
     r.groupName ??
-      (groupFromMeta ? groupFromMeta.name : undefined) ??
-      fallbackGroupName,
+    (groupFromMeta ? groupFromMeta.name : undefined) ??
+    fallbackGroupName,
   );
   const amount = Number(r.amount ?? r.amt ?? 0) || 0;
   const createdAt = asOptString(r.createdAt ?? r.date);
@@ -237,14 +237,14 @@ function normalizePayment(
 
   const rawMode = asOptString(
     r.method ??
-      r.paymentMode ??
-      r.mode ??
-      r.type ??
-      (rawMeta
-        ? (rawMeta as UnknownRecord).method ??
-          (rawMeta as UnknownRecord).paymentMode ??
-          (rawMeta as UnknownRecord).mode
-        : undefined),
+    r.paymentMode ??
+    r.mode ??
+    r.type ??
+    (rawMeta
+      ? (rawMeta as UnknownRecord).method ??
+      (rawMeta as UnknownRecord).paymentMode ??
+      (rawMeta as UnknownRecord).mode
+      : undefined),
   );
 
   // normalize to 'cash' / 'upi' / null
@@ -287,22 +287,22 @@ function normalizePayment(
     r.utr !== undefined
       ? r.utr
       : r.txnId !== undefined
-      ? r.txnId
-      : r.reference !== undefined
-      ? r.reference
-      : undefined;
+        ? r.txnId
+        : r.reference !== undefined
+          ? r.reference
+          : undefined;
   const noteValue =
     r.note !== undefined
       ? r.note
       : r.adminNote !== undefined
-      ? r.adminNote
-      : undefined;
+        ? r.adminNote
+        : undefined;
   const fileValue =
     r.fileUrl !== undefined
       ? r.fileUrl
       : r.attachment !== undefined
-      ? r.attachment
-      : undefined;
+        ? r.attachment
+        : undefined;
 
   const statusLower = (status ?? "").toLowerCase();
   const verified = statusLower === "approved" || Boolean(r.verified ?? false);
@@ -312,9 +312,9 @@ function normalizePayment(
   const collectedById = rawMeta ? asOptString(rawMeta.collectedById) : undefined;
   const collectorName = rawMeta
     ? asOptString(
-        rawMeta.collectorName ??
-          (rawMeta as UnknownRecord).collectedByName,
-      )
+      rawMeta.collectorName ??
+      (rawMeta as UnknownRecord).collectedByName,
+    )
     : undefined;
 
   return {
@@ -353,16 +353,16 @@ export default function AdminTransactionsPage(): React.ReactElement {
     const arr = Array.isArray(ms?.list)
       ? ms.list
       : Array.isArray(ms?.items)
-      ? ms.items
-      : Array.isArray(ms?.members)
-      ? ms.members
-      : [];
+        ? ms.items
+        : Array.isArray(ms?.members)
+          ? ms.members
+          : [];
     return (arr as unknown[]).map((it) =>
       isRecord(it)
         ? {
-            id: String(it._id ?? it.id ?? ""),
-            name: typeof it.name === "string" ? it.name : undefined,
-          }
+          id: String(it._id ?? it.id ?? ""),
+          name: typeof it.name === "string" ? it.name : undefined,
+        }
         : { id: String(it ?? ""), name: undefined },
     );
   });
@@ -418,7 +418,7 @@ export default function AdminTransactionsPage(): React.ReactElement {
           return;
         }
 
-                const body = resp.body;
+        const body = resp.body;
         let arr: unknown[] = [];
 
         if (Array.isArray(body)) {
@@ -440,9 +440,9 @@ export default function AdminTransactionsPage(): React.ReactElement {
           const name =
             asOptString(
               r.name ??
-                r.fullName ??
-                r.displayName ??
-                r.username,
+              r.fullName ??
+              r.displayName ??
+              r.username,
             ) ?? undefined;
 
           const email =
@@ -453,9 +453,9 @@ export default function AdminTransactionsPage(): React.ReactElement {
           const phone =
             asOptString(
               r.phone ??
-                r.mobile ??
-                r.contactNumber ??
-                r.number,
+              r.mobile ??
+              r.contactNumber ??
+              r.number,
             ) ?? undefined;
 
           normalized.push({
@@ -470,8 +470,7 @@ export default function AdminTransactionsPage(): React.ReactElement {
 
       } catch (err) {
         log(
-          `error loading collection users: ${
-            err instanceof Error ? err.message : String(err)
+          `error loading collection users: ${err instanceof Error ? err.message : String(err)
           }`,
         );
       }
@@ -632,8 +631,8 @@ export default function AdminTransactionsPage(): React.ReactElement {
       const gid = existing?.groupId ?? undefined;
       const url = gid
         ? `/api/chitgroups/${encodeURIComponent(
-            gid,
-          )}/payments/approve`
+          gid,
+        )}/payments/approve`
         : "/api/admin/transactions";
 
       const res = await fetch(url, {
@@ -658,8 +657,8 @@ export default function AdminTransactionsPage(): React.ReactElement {
             jRec.error !== undefined
               ? jRec.error
               : jRec.message !== undefined
-              ? jRec.message
-              : undefined;
+                ? jRec.message
+                : undefined;
           if (typeof errVal === "string") errMsg = errVal;
         }
         throw new Error(errMsg);
@@ -794,11 +793,11 @@ export default function AdminTransactionsPage(): React.ReactElement {
           const statusLower = (p.status ?? "").toLowerCase();
           const isApproved =
             statusLower === "approved" || p.verified === true;
-          const isCollectionAutoApproved =
-            isApproved &&
-            (p.collectedVia === "collection-screen" ||
-              p.collectorRole != null ||
-              p.collectedById != null);
+          // const isCollectionAutoApproved =
+          //   isApproved &&
+          //   (p.collectedVia === "collection-screen" ||
+          //     p.collectorRole != null ||
+          //     p.collectedById != null);
 
           return (
             <Card key={p._id}>
@@ -811,16 +810,10 @@ export default function AdminTransactionsPage(): React.ReactElement {
                     <div>
                       <div className="font-semibold text-lg flex items-center gap-2">
                         {displayName}
-                        <Badge
-                          variant="outline"
-                          className="text-[10px]"
-                        >
-                          {isCollectionAutoApproved
-                            ? "Collection (auto-approved)"
-                            : isApproved
-                            ? "Approved"
-                            : "Pending Verification"}
+                        <Badge variant="outline" className="text-[10px]">
+                          {isApproved ? "Approved" : "Pending Verification"}
                         </Badge>
+
                       </div>
                       <div className="text-xs text-gray-500">
                         {displayGroup}
@@ -885,8 +878,8 @@ export default function AdminTransactionsPage(): React.ReactElement {
                         {p.method === "cash"
                           ? "CASH"
                           : p.method === "upi"
-                          ? "UPI"
-                          : "-"}
+                            ? "UPI"
+                            : "-"}
                       </div>
                     </div>
                     <div>

@@ -127,6 +127,14 @@ export default function UserProfilePage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [oldPassword, setOldPassword] = useState("");
+const [newPassword, setNewPassword] = useState("");
+const [confirmPassword, setConfirmPassword] = useState("");
+
+const [pwdLoading, setPwdLoading] = useState(false);
+const [pwdMessage, setPwdMessage] = useState<string | null>(null);
+const [pwdError, setPwdError] = useState<string | null>(null);
+
   // hydrate from localStorage (fast) and fetch members + groups (server)
   useEffect(() => {
     // 1) hydrate quick local data if any
@@ -211,68 +219,116 @@ export default function UserProfilePage() {
 
   // Save handler (name + address only)
   // Save handler (name + address only)
-async function handleSave() {
-  if (!authMember) {
-    setError("No signed-in user found");
-    return;
+  async function handleSave() {
+    if (!authMember) {
+      setError("No signed-in user found");
+      return;
+    }
+    const userId = getString(authMember, "_id", "id") ?? getString(authMember, "id") ?? "";
+    if (!userId) {
+      setError("Invalid user id");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    const updates: Partial<Member> = {};
+    if (name !== (getString(authMember, "name") ?? "")) updates.name = name;
+    if (address !== (getString(authMember, "address") ?? getString(authMember, "addr") ?? "")) updates.address = address;
+
+    if (Object.keys(updates).length === 0) {
+      setIsEditing(false);
+      setSaving(false);
+      return;
+    }
+
+    try {
+      const rawAction = await dispatch(updateMember({ id: userId, updates }));
+      // safely view as a record to inspect runtime fields without using `any`
+      const action = rawAction as unknown as Record<string, unknown>;
+
+      // If action.type ends with '/fulfilled' we expect a payload
+      if (typeof action.type === "string" && action.type.endsWith("/fulfilled") && "payload" in action && action.payload) {
+        const updated = action.payload as Member;
+        dispatch(hydrateMember(updated));
+        try {
+          localStorage.setItem("member", JSON.stringify(updated));
+        } catch {
+          // ignore
+        }
+        setIsEditing(false);
+      } else {
+        // Try extract useful error message from payload or error fields (both are unknown at compile time)
+        let payloadMsg: string | undefined;
+        if ("payload" in action && typeof action.payload === "object" && action.payload !== null) {
+          const p = action.payload as Record<string, unknown>;
+          if ("message" in p && typeof p.message === "string") payloadMsg = p.message;
+        } else if ("payload" in action && typeof action.payload === "string") {
+          payloadMsg = String(action.payload);
+        }
+
+        let errorMsg: string | undefined;
+        if ("error" in action && typeof action.error === "object" && action.error !== null) {
+          const e = action.error as Record<string, unknown>;
+          if ("message" in e && typeof e.message === "string") errorMsg = e.message;
+        }
+
+        const errMsg = payloadMsg ?? errorMsg ?? "Failed to save profile";
+        throw new Error(String(errMsg));
+      }
+    } catch (err) {
+      setError((err as Error).message || "Failed to save profile");
+    } finally {
+      setSaving(false);
+    }
   }
-  const userId = getString(authMember, "_id", "id") ?? getString(authMember, "id") ?? "";
-  if (!userId) {
-    setError("Invalid user id");
+async function handleChangePassword() {
+  setPwdError(null);
+  setPwdMessage(null);
+
+  if (!oldPassword || !newPassword || !confirmPassword) {
+    setPwdError("All password fields are required");
     return;
   }
 
-  setSaving(true);
-  setError(null);
-
-  const updates: Partial<Member> = {};
-  if (name !== (getString(authMember, "name") ?? "")) updates.name = name;
-  if (address !== (getString(authMember, "address") ?? getString(authMember, "addr") ?? "")) updates.address = address;
-
-  if (Object.keys(updates).length === 0) {
-    setIsEditing(false);
-    setSaving(false);
+  if (newPassword !== confirmPassword) {
+    setPwdError("New passwords do not match");
     return;
   }
+
+  if (newPassword.length < 6) {
+    setPwdError("Password must be at least 6 characters");
+    return;
+  }
+
+  setPwdLoading(true);
 
   try {
-    const rawAction = await dispatch(updateMember({ id: userId, updates }));
-    // safely view as a record to inspect runtime fields without using `any`
-    const action = rawAction as unknown as Record<string, unknown>;
+    const res = await fetch("/api/auth/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        oldPassword,
+        newPassword,
+      }),
+    });
 
-    // If action.type ends with '/fulfilled' we expect a payload
-    if (typeof action.type === "string" && action.type.endsWith("/fulfilled") && "payload" in action && action.payload) {
-      const updated = action.payload as Member;
-      dispatch(hydrateMember(updated));
-      try {
-        localStorage.setItem("member", JSON.stringify(updated));
-      } catch {
-        // ignore
-      }
-      setIsEditing(false);
-    } else {
-      // Try extract useful error message from payload or error fields (both are unknown at compile time)
-      let payloadMsg: string | undefined;
-      if ("payload" in action && typeof action.payload === "object" && action.payload !== null) {
-        const p = action.payload as Record<string, unknown>;
-        if ("message" in p && typeof p.message === "string") payloadMsg = p.message;
-      } else if ("payload" in action && typeof action.payload === "string") {
-        payloadMsg = String(action.payload);
-      }
+    const data = await res.json();
 
-      let errorMsg: string | undefined;
-      if ("error" in action && typeof action.error === "object" && action.error !== null) {
-        const e = action.error as Record<string, unknown>;
-        if ("message" in e && typeof e.message === "string") errorMsg = e.message;
-      }
-
-      const errMsg = payloadMsg ?? errorMsg ?? "Failed to save profile";
-      throw new Error(String(errMsg));
+    if (!res.ok || !data?.success) {
+      throw new Error(data?.message || "Failed to change password");
     }
+
+    setPwdMessage("Password changed successfully");
+    setOldPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
   } catch (err) {
-    setError((err as Error).message || "Failed to save profile");
+    setPwdError(err instanceof Error ? err.message : "Something went wrong");
   } finally {
-    setSaving(false);
+    setPwdLoading(false);
   }
 }
 
@@ -329,7 +385,8 @@ async function handleSave() {
 
   // UI-level values
   const avatarUrl = getString(authMember, "avatarUrl", "avatar", "photo") ?? "";
-  const displayEmail = getString(authMember, "email") ?? "—";
+  const displayUserId =
+    getString(authMember, "userId", "_id", "id") ?? "—";
   const displayMobile = getString(authMember, "mobile", "phone", "phoneNumber") ?? "—";
   const displayJoining = niceDate(getDateString(authMember, "joiningDate", "joinedAt", "createdAt") ?? undefined);
   const displayStatus = getString(authMember, "status") ?? "—";
@@ -396,8 +453,9 @@ async function handleSave() {
             </div>
 
             <div>
-              <Label className="text-sm text-[var(--text-secondary)]">Email</Label>
-              <Input type="email" value={displayEmail} disabled className="mt-1 border-transparent bg-[var(--bg-input)] text-[var(--text-primary)]" />
+              <Label className="text-sm text-[var(--text-secondary)]">User ID</Label>
+              <Input type="text" value={displayUserId} disabled />
+
             </div>
 
             <div>
@@ -451,6 +509,53 @@ async function handleSave() {
               </div>
             </div>
           </div>
+
+          <div className="pt-4 border-t border-[var(--border-color)]">
+  <Label className="text-sm text-[var(--text-secondary)]">
+    Change Password
+  </Label>
+
+  <div className="mt-3 space-y-3">
+    <Input
+      type="password"
+      placeholder="Old Password"
+      value={oldPassword}
+      onChange={(e) => setOldPassword(e.target.value)}
+    />
+
+    <Input
+      type="password"
+      placeholder="New Password"
+      value={newPassword}
+      onChange={(e) => setNewPassword(e.target.value)}
+    />
+
+    <Input
+      type="password"
+      placeholder="Confirm New Password"
+      value={confirmPassword}
+      onChange={(e) => setConfirmPassword(e.target.value)}
+    />
+
+    {pwdError && (
+      <div className="text-red-600 text-sm">{pwdError}</div>
+    )}
+
+    {pwdMessage && (
+      <div className="text-green-600 text-sm">{pwdMessage}</div>
+    )}
+
+    <Button
+      size="sm"
+      className="w-full bg-[var(--color-primary)]"
+      onClick={handleChangePassword}
+      disabled={pwdLoading}
+    >
+      {pwdLoading ? "Updating..." : "Change Password"}
+    </Button>
+  </div>
+</div>
+
 
           {error && <div className="text-red-600 text-sm">{error}</div>}
 

@@ -25,7 +25,7 @@ import type { AppDispatch, RootState } from "@/store/store";
  */
 
 interface AuthSliceShape {
-  member?: { name?: string; email?: string } | null;
+  member?: { name?: string; userId?: string } | null;
   loading?: boolean;
   error?: string | null;
 }
@@ -48,7 +48,7 @@ export default function Topbar() {
 
   useEffect(() => {
     if (auth?.member) {
-      setDisplayName(auth.member.name ?? auth.member.email ?? "User");
+      setDisplayName(auth.member.name ?? auth.member.userId ?? "User");
     } else {
       setDisplayName(null);
     }
@@ -117,7 +117,7 @@ export default function Topbar() {
               <DropdownMenuLabel>
                 <div className="flex flex-col space-y-1">
                   <p className="text-sm font-medium text-[var(--text-primary)]">{displayName ?? "Guest"}</p>
-                  <p className="text-xs text-[var(--text-secondary)]">{auth?.member?.email ?? "Not signed in"}</p>
+                  <p className="text-xs text-[var(--text-secondary)]">{auth?.member?.userId ?? "Not signed in"}</p>
                 </div>
               </DropdownMenuLabel>
 
@@ -126,10 +126,7 @@ export default function Topbar() {
                 <UserIcon className="mr-2 h-4 w-4 text-[var(--text-secondary)]" />
                 <span>Profile</span>
               </DropdownMenuItem>
-              <DropdownMenuItem className="hover:bg-[var(--bg-highlight)]">
-                <Settings className="mr-2 h-4 w-4 text-[var(--text-secondary)]" />
-                <span>Settings</span>
-              </DropdownMenuItem>
+              
 
               <DropdownMenuSeparator className="bg-[var(--border-color)]" />
               <DropdownMenuItem

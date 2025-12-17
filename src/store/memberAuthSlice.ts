@@ -10,7 +10,7 @@ export interface AuthState {
   member: Member | null;
   loading: boolean;
   error: string | null;
-  token?: string | null;
+  token: string | null;
 }
 
 const initialState: AuthState = {
@@ -20,210 +20,112 @@ const initialState: AuthState = {
   token: null,
 };
 
-/** Small safe helpers **/
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === "object" && x !== null;
-}
-
-function safeJsonParse<T = unknown>(input: unknown): T | null {
-  try {
-    if (input === null || input === undefined) return null;
-    return input as T;
-  } catch {
-    return null;
-  }
-}
-
-function getStringProp(obj: unknown, key: string): string | null {
-  if (!isRecord(obj)) return null;
-  const v = obj[key];
-  if (typeof v === "string") return v;
-  if (typeof v === "number") return String(v);
-  return null;
-}
-
-function getBooleanProp(obj: unknown, key: string): boolean | null {
-  if (!isRecord(obj)) return null;
-  const v = obj[key];
-  if (typeof v === "boolean") return v;
-  if (typeof v === "string") {
-    if (v.toLowerCase() === "true") return true;
-    if (v.toLowerCase() === "false") return false;
-  }
-  return null;
-}
-
-function getUnknownProp(obj: unknown, key: string): unknown {
-  if (!isRecord(obj)) return undefined;
-  return obj[key];
-}
-
-function extractTokenFromResponse(data: Record<string, unknown> | null): string | null {
-  if (!data) return null;
-  const tokenRoot = getStringProp(data, "token");
-  if (tokenRoot) return tokenRoot;
-
-  // maybe token nested in member/user
-  const memberCandidate = getUnknownProp(data, "member") ?? getUnknownProp(data, "user");
-  if (isRecord(memberCandidate)) {
-    const tokenMember = getStringProp(memberCandidate, "token");
-    if (tokenMember) return tokenMember;
-  }
-  return null;
-}
-
-function extractMemberCandidate(data: Record<string, unknown> | null): unknown | null {
-  if (!data) return null;
-  return getUnknownProp(data, "member") ?? getUnknownProp(data, "user") ?? null;
-}
-
-function normalizeMemberForStorage(memberRaw: unknown, token?: string | null) {
-  // create minimal member object to put in localStorage (id, name, email, token, role, avatarUrl)
-  const id = isRecord(memberRaw) ? (getStringProp(memberRaw, "id") ?? getStringProp(memberRaw, "_id") ?? "") : "";
-  const name = isRecord(memberRaw) ? (getStringProp(memberRaw, "name") ?? "") : "";
-  const email = isRecord(memberRaw) ? (getStringProp(memberRaw, "email") ?? "") : "";
-
-  // role: try role or roles[0]
-  let role: unknown = undefined;
-  if (isRecord(memberRaw)) {
-    role = memberRaw.role ?? (memberRaw.roles ?? undefined);
-  }
-  let roleStr = "user";
-  if (typeof role === "string") roleStr = role;
-  else if (Array.isArray(role) && role.length > 0 && typeof role[0] === "string") roleStr = role[0];
-
-  const avatarUrl =
-    isRecord(memberRaw) ? (getStringProp(memberRaw, "avatarUrl") ?? getStringProp(memberRaw, "photo") ?? undefined) : undefined;
-
-  return {
-    id,
-    name,
-    email,
-    token: token ?? undefined,
-    role: roleStr,
-    avatarUrl,
-  } as Record<string, unknown>;
-}
-
-/** Thunks **/
+/* ---------------- LOGIN (USERID + PASSWORD) ---------------- */
 
 export const loginMember = createAsyncThunk<
-  { member: Member; token?: string | null },
-  { email: string; password: string },
-  { rejectValue: string }
->("auth/loginMember", async (creds, { rejectWithValue }) => {
+  { member: Member; token: string | null },
+  { userId: string; password: string },
+  { rejectValue: { message: string } }
+>("auth/loginMember", async ({ userId, password }, { rejectWithValue }) => {
   try {
     const res = await fetch(AUTH_LOGIN_PATH, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify(creds),
+      body: JSON.stringify({ userId, password }),
     });
 
-    const raw = await res.json().catch(() => ({} as unknown));
-    const data = safeJsonParse<Record<string, unknown>>(raw) ?? {};
+    const data = await res.json();
 
-    // compute success flag if provided, otherwise default to true for ok responses
-    const successFlag = getBooleanProp(data, "success");
-    const success = successFlag === null ? res.ok : successFlag === true;
-
-    const memberPresent =
-      getUnknownProp(data, "member") !== undefined && getUnknownProp(data, "member") !== null;
-
-    if (!res.ok || (!success && !memberPresent)) {
-      const msg = (getStringProp(data, "message") ?? getStringProp(data, "error")) ?? `Login failed (${res.status})`;
-      return rejectWithValue(String(msg));
+    if (!res.ok || !data?.success) {
+      return rejectWithValue({
+        message: data?.message || "Login failed",
+      });
     }
 
-    const token = extractTokenFromResponse(data);
-    const memberCandidate = extractMemberCandidate(data);
-    const member = (memberCandidate as unknown as Member) ?? ({} as Member);
+    const token: string | null = data.member?.token ?? null;
+    const member: Member = data.member;
 
     try {
       if (token) localStorage.setItem("memberToken", token);
-      if (member && Object.keys(member as Record<string, unknown>).length > 0) {
-        const storeObj = normalizeMemberForStorage(member, token);
-        localStorage.setItem("member", JSON.stringify(storeObj));
-      }
-    } catch {
-      // ignore storage errors
-    }
+      localStorage.setItem("member", JSON.stringify(member));
+    } catch { }
 
     return { member, token };
+
+
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Network error";
-    return rejectWithValue(msg);
+    return rejectWithValue({
+      message: err instanceof Error ? err.message : "Network error",
+    });
   }
 });
 
-export const logoutMember = createAsyncThunk<void, void, { rejectValue: string }>(
-  "auth/logoutMember",
-  async (_, { rejectWithValue }) => {
-    try {
-      const res = await fetch(AUTH_LOGOUT_PATH, {
-        method: "POST",
-        credentials: "include",
+/* ---------------- LOGOUT ---------------- */
+
+export const logoutMember = createAsyncThunk<
+  void,
+  void,
+  { rejectValue: { message: string } }
+>("auth/logoutMember", async (_, { rejectWithValue }) => {
+  try {
+    const res = await fetch(AUTH_LOGOUT_PATH, {
+      method: "POST",
+      credentials: "include",
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || !data?.success) {
+      return rejectWithValue({
+        message: data?.message || "Logout failed",
       });
-      const raw = await res.json().catch(() => ({} as unknown));
-      const data = safeJsonParse<Record<string, unknown>>(raw) ?? {};
-
-      const successFlag = getBooleanProp(data, "success");
-      const hasError = getUnknownProp(data, "error") !== undefined && getUnknownProp(data, "error") !== null;
-
-      if (!res.ok || (successFlag === false || hasError)) {
-        const msg = (getStringProp(data, "message") ?? getStringProp(data, "error")) ?? `Logout failed (${res.status})`;
-        return rejectWithValue(String(msg));
-      }
-
-      try {
-        localStorage.removeItem("member");
-        localStorage.removeItem("memberToken");
-      } catch {
-        // ignore
-      }
-
-      return;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Network error";
-      return rejectWithValue(msg);
     }
+
+    try {
+      localStorage.removeItem("member");
+      localStorage.removeItem("memberToken");
+    } catch { }
+  } catch (err) {
+    return rejectWithValue({
+      message: err instanceof Error ? err.message : "Network error",
+    });
   }
-);
+});
+
+/* ---------------- FETCH CURRENT MEMBER ---------------- */
 
 export const fetchCurrentMember = createAsyncThunk<
-  { member: Member; token?: string | null },
+  { member: Member; token: string | null },
   void,
-  { rejectValue: string }
+  { rejectValue: { message: string } }
 >("auth/fetchCurrentMember", async (_, { rejectWithValue }) => {
   try {
-    const res = await fetch(AUTH_ME_PATH, { method: "GET", credentials: "include", headers: { "Content-Type": "application/json" } });
-    const raw = await res.json().catch(() => ({} as unknown));
-    const data = safeJsonParse<Record<string, unknown>>(raw) ?? {};
+    const res = await fetch(AUTH_ME_PATH, {
+      method: "GET",
+      credentials: "include",
+    });
 
-    if (!res.ok) {
-      const msg = (getStringProp(data, "message") ?? getStringProp(data, "error")) ?? `Failed to fetch member (${res.status})`;
-      return rejectWithValue(String(msg));
+    const data = await res.json();
+
+    if (!res.ok || !data?.success) {
+      return rejectWithValue({
+        message: data?.message || "Failed to fetch member",
+      });
     }
 
-    const token = extractTokenFromResponse(data);
-    const memberCandidate = extractMemberCandidate(data);
-    const member = (memberCandidate as unknown as Member) ?? ({} as Member);
-
-    try {
-      if (token) localStorage.setItem("memberToken", token);
-      if (member && Object.keys(member as Record<string, unknown>).length > 0) localStorage.setItem("member", JSON.stringify(member));
-    } catch {
-      // ignore
-    }
-
-    return { member, token };
+    return {
+      member: data.member,
+      token: data.token ?? null,
+    };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Network error";
-    return rejectWithValue(msg);
+    return rejectWithValue({
+      message: err instanceof Error ? err.message : "Network error",
+    });
   }
 });
 
-/** Slice **/
+/* ---------------- SLICE ---------------- */
 
 const authSlice = createSlice({
   name: "auth",
@@ -234,12 +136,9 @@ const authSlice = createSlice({
       state.error = null;
       state.loading = false;
     },
-    clearAuthError(state) {
-      state.error = null;
-    },
     setClientToken(state, action: PayloadAction<string | null>) {
-      state.token = action.payload;
-    },
+    state.token = action.payload;
+  },
     clearAuth(state) {
       state.member = null;
       state.token = null;
@@ -249,96 +148,33 @@ const authSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
-      // login
       .addCase(loginMember.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
-      .addCase(loginMember.fulfilled, (state, action: PayloadAction<{ member: Member; token?: string | null }>) => {
+      .addCase(loginMember.fulfilled, (state, action) => {
         state.loading = false;
         state.member = action.payload.member;
-        state.token = action.payload.token ?? null;
-        state.error = null;
+        state.token = action.payload.token;
       })
       .addCase(loginMember.rejected, (state, action) => {
         state.loading = false;
-        state.error = (action.payload as string) ?? action.error?.message ?? "Login failed";
+        state.error = action.payload?.message ?? "Login failed";
         state.member = null;
         state.token = null;
       })
 
-      // logout
-      .addCase(logoutMember.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
       .addCase(logoutMember.fulfilled, (state) => {
-        state.loading = false;
-        state.member = null;
-        state.token = null;
-      })
-      .addCase(logoutMember.rejected, (state, action) => {
-        state.loading = false;
-        state.error = (action.payload as string) ?? action.error?.message ?? "Logout failed";
         state.member = null;
         state.token = null;
       })
 
-      // fetchCurrentMember
-      .addCase(fetchCurrentMember.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(fetchCurrentMember.fulfilled, (state, action: PayloadAction<{ member: Member; token?: string | null }>) => {
-        state.loading = false;
+      .addCase(fetchCurrentMember.fulfilled, (state, action) => {
         state.member = action.payload.member;
-        state.token = action.payload.token ?? null;
-        state.error = null;
-      })
-      .addCase(fetchCurrentMember.rejected, (state, action) => {
-        state.loading = false;
-        state.error = (action.payload as string) ?? action.error?.message ?? "Failed to fetch member";
-        state.member = null;
-        state.token = null;
+        state.token = action.payload.token;
       });
   },
 });
 
-export const { hydrateMember, clearAuthError, setClientToken, clearAuth } = authSlice.actions;
+export const { hydrateMember, setClientToken ,clearAuth } = authSlice.actions;
 export default authSlice.reducer;
-
-/**
- * Utility to check membership in common shapes returned by various backends.
- */
-export function memberHasJoined(member: Member | null, groupId: string): boolean {
-  if (!member) return false;
-
-  const asRec = member as unknown as Record<string, unknown>;
-
-  const arraysToCheck = [
-    getUnknownProp(asRec, "joinedGroupIds"),
-    getUnknownProp(asRec, "joinedGroups"),
-    getUnknownProp(asRec, "groups"),
-    getUnknownProp(asRec, "groupIds"),
-    getUnknownProp(asRec, "memberOf"),
-  ] as unknown[];
-
-  for (const arr of arraysToCheck) {
-    if (Array.isArray(arr)) {
-      if (
-        arr.some((entry) => {
-          if (typeof entry === "string") return String(entry) === String(groupId);
-          if (isRecord(entry)) {
-            const id = getStringProp(entry, "_id") ?? getStringProp(entry, "id") ?? "";
-            return String(id) === String(groupId);
-          }
-          return false;
-        })
-      ) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}

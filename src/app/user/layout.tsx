@@ -1,4 +1,3 @@
-// src/app/user/layout.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -10,6 +9,7 @@ import { useSelector, useDispatch } from "react-redux";
 import type { RootState, AppDispatch } from "@/store/store";
 import { hydrateMember, setClientToken } from "@/store/memberAuthSlice";
 
+/* ---------- small helpers ---------- */
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null;
 }
@@ -20,97 +20,69 @@ function extractString(x: unknown, fallback = ""): string {
   return fallback;
 }
 
+/* ---------- layout ---------- */
 export default function UserLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const dispatch = useDispatch<AppDispatch>();
 
-  // read member from redux (fast)
-  const reduxMember = useSelector((s: RootState) => {
-    const raw = (s as unknown as { auth?: unknown }).auth;
-    if (isRecord(raw) && raw.member !== undefined && raw.member !== null) {
-      // keep the shape but don't assume deeper types
-      return raw.member as unknown;
-    }
-    return null;
-  }) as unknown | null;
+  // redux member
+  const reduxMember = useSelector((s: RootState) => s.auth.member);
 
-  // clientToken: undefined = resolving, null = no token, string = token present
-  const [clientToken, setClientTokenLocal] = useState<string | null | undefined>(undefined);
+  // undefined = checking, null = no auth, string = token
+  const [clientToken, setClientTokenLocal] =
+    useState<string | null | undefined>(undefined);
 
+  /* ---------- hydrate on reload ---------- */
   useEffect(() => {
-    // If redux already has member, use token from redux or localStorage
+    // case 1: redux already has member
     if (reduxMember) {
-      try {
-        const globalState = (typeof window !== "undefined" ? (window as unknown) : undefined) as unknown;
-        let maybeToken: string | null | undefined = undefined;
+      const token = localStorage.getItem("memberToken");
 
-        if (isRecord(globalState)) {
-          const reduxState = globalState as Record<string, unknown>;
-          const authSlice = reduxState.__REDUX_STATE__ as unknown;
-          if (isRecord(authSlice)) {
-            const token = authSlice.token;
-            if (typeof token === "string") maybeToken = token;
-          }
-        }
-
-        if (!maybeToken) {
-          const lsToken = typeof window !== "undefined" ? localStorage.getItem("memberToken") : null;
-          if (lsToken) maybeToken = lsToken;
-        }
-
-        setClientTokenLocal(maybeToken ?? "present");
-
-        // ensure slice token is set too
-        if (maybeToken) dispatch(setClientToken(maybeToken));
-      } catch {
+      if (token) {
+        dispatch(setClientToken(token));
+        setClientTokenLocal(token);
+      } else {
+        // redux member exists → don't logout immediately
         setClientTokenLocal("present");
       }
       return;
     }
 
-    // try to hydrate redux from localStorage
+    // case 2: hydrate from localStorage
     try {
-      const raw = typeof window !== "undefined" ? localStorage.getItem("member") : null;
-      const token = typeof window !== "undefined" ? localStorage.getItem("memberToken") : null;
+      const raw = localStorage.getItem("member");
+      const token = localStorage.getItem("memberToken");
 
-      if (raw) {
-        try {
-          const parsed = JSON.parse(raw) as unknown;
-          if (isRecord(parsed)) {
-            const maybeId = parsed.id ?? parsed._id;
-            const idStr = extractString(maybeId, "");
-            if (idStr) {
-              const memberObj: { id: string; name: string; email: string } = {
-                id: idStr,
-                name: extractString(parsed.name, ""),
-                email: extractString(parsed.email, ""),
-              };
-              dispatch(hydrateMember(memberObj));
-            }
-          }
-        } catch {
-          // ignore JSON parse
+      if (raw && token) {
+        const parsed = JSON.parse(raw);
+        if (isRecord(parsed)) {
+          dispatch(
+            hydrateMember({
+              id: extractString(parsed.id ?? parsed._id),
+              name: extractString(parsed.name),
+              email: extractString(parsed.email),
+            } as any)
+          );
+          dispatch(setClientToken(token));
+          setClientTokenLocal(token);
+          return;
         }
       }
 
-      if (token) {
-        setClientTokenLocal(token);
-        dispatch(setClientToken(token));
-      } else {
-        setClientTokenLocal(null);
-      }
+      setClientTokenLocal(null);
     } catch {
       setClientTokenLocal(null);
     }
   }, [reduxMember, dispatch]);
 
-  // redirect when resolved and no token
+  /* ---------- redirect if not logged in ---------- */
   useEffect(() => {
     if (clientToken === null) {
       router.replace("/");
     }
   }, [clientToken, router]);
 
+  /* ---------- loading skeleton ---------- */
   if (clientToken === undefined) {
     return (
       <>
@@ -130,6 +102,7 @@ export default function UserLayout({ children }: { children: React.ReactNode }) 
 
   if (clientToken === null) return null;
 
+  /* ---------- authenticated layout ---------- */
   return (
     <>
       <Topbar />
