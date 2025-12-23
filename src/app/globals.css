@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+:root {
+  /* Brand Colors */
+  --color-primary: #8C2F39; /* Rich maroon – confident, elegant */
+  --color-secondary: #D95F18; /* Burnt orange – warmth and energy */
+  --color-accent: #E7B10A; /* Golden yellow – premium highlight */
+  --color-accent-light: #F9D67A; /* Soft gold accent */
+
+  /* Backgrounds */
+  --bg-main: #FFFFFF; /* Always white */
+  --bg-card: #FFFFFF; /* White cards */
+  --bg-highlight: #FFF8EB; /* Subtle warm highlight */
+
+  /* Text */
+  --text-primary: #1E1E1E; /* Strong dark gray for readability */
+  --text-secondary: #555555; /* Muted text */
+  --text-light: #FFFFFF; /* For buttons */
+  --text-accent: var(--color-accent);
+
+  /* Borders & Shadows */
+  --border-color: #E5E5E5;
+  --shadow-color: rgba(0, 0, 0, 0.1);
+
+  /* Buttons */
+  --btn-primary-bg: var(--color-primary);
+  --btn-primary-hover: #73232E;
+  --btn-secondary-bg: var(--color-secondary);
+  --btn-secondary-hover: #B44C14;
+  --btn-accent-bg: var(--color-accent);
+  --btn-accent-hover: #C89A09;
+
+  /* Gradients */
+  --gradient-primary: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  --gradient-primary-hover: linear-gradient(135deg, var(--btn-primary-hover), var(--btn-secondary-hover));
+
+  /* Transitions */
+  --transition-fast: 0.2s ease-in-out;
+  --transition-medium: 0.4s ease-in-out;
+}
+
+/* Force light theme even in dark mode */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: light;
+    --bg-main: #FFFFFF;
+    --bg-card: #FFFFFF;
+    --bg-highlight: #FFF8EB;
+  }
+}
+
+body {
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+html, body {
+  scroll-behavior: smooth;
+  touch-action: pan-x pan-y;
+  overscroll-behavior: none;
+}
