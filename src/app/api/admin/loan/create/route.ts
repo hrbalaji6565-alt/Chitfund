@@ -30,9 +30,20 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { userId, amount, monthlyInterestPercent, durationInMonths, startDate, endDate, emiAmount, schedule } = body;
+    const { 
+      userId, 
+      amount, 
+      monthlyInterestPercent, 
+      durationType = "MONTHS",
+      durationValue,
+      durationInMonths, // Keep for backward compatibility
+      startDate, 
+      endDate, 
+      emiAmount, 
+      schedule 
+    } = body;
 
-    if (!userId || !amount || !monthlyInterestPercent || !durationInMonths || !startDate) {
+    if (!userId || !amount || !monthlyInterestPercent || !durationValue || !startDate) {
       return NextResponse.json({ success: false, message: "Missing required fields" }, { status: 400 });
     }
 
@@ -44,38 +55,62 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, message: "Member not found" }, { status: 404 });
     }
 
-    // Calculate next EMI due date (1 month from start date)
+    // Calculate next EMI due date based on duration type
     const startDateObj = new Date(startDate);
-    const nextEMIDueDate = new Date(startDateObj);
-    nextEMIDueDate.setMonth(nextEMIDueDate.getMonth() + 1);
-
-    // Generate EMI schedule with due dates
-    // First EMI due: 1 month after loan approval date (same day of month)
-    const emiSchedule = [];
-    const baseEMIAmount = Number(emiAmount);
-    const duration = Number(durationInMonths);
+    let nextEMIDueDate;
     
-    for (let i = 1; i <= duration; i++) {
-      const dueDate = new Date(startDateObj);
-      dueDate.setMonth(dueDate.getMonth() + i);
-      
-      emiSchedule.push({
-        monthNumber: i,
-        emiAmount: baseEMIAmount,
-        dueDate: dueDate,
-        penalty: 0,
-        paidAmount: 0,
-        status: "pending",
-      });
+    if (durationType === "MONTHS") {
+      // 1 month from start date for monthly loans
+      nextEMIDueDate = new Date(startDateObj);
+      nextEMIDueDate.setMonth(nextEMIDueDate.getMonth() + 1);
+    } else {
+      // End date for day-based loans (single payment)
+      nextEMIDueDate = new Date(endDate);
     }
 
-    // Create loan document with all required fields
+    // Use provided schedule or generate default
+    let emiSchedule = schedule || [];
+    if (!emiSchedule.length) {
+      const baseEMIAmount = Number(emiAmount);
+      
+      if (durationType === "MONTHS") {
+        // Generate monthly schedule
+        for (let i = 1; i <= durationValue; i++) {
+          const dueDate = new Date(startDateObj);
+          dueDate.setMonth(dueDate.getMonth() + i);
+          
+          emiSchedule.push({
+            monthNumber: i,
+            emiAmount: baseEMIAmount,
+            dueDate: dueDate,
+            penalty: 0,
+            paidAmount: 0,
+            status: "pending",
+          });
+        }
+      } else {
+        // Generate single payment for day-based loan
+        emiSchedule.push({
+          monthNumber: 1,
+          emiAmount: baseEMIAmount,
+          dueDate: new Date(endDate),
+          penalty: 0,
+          paidAmount: 0,
+          status: "pending",
+        });
+      }
+    }
+
+    // Create loan document with enhanced fields
     const loan = await Loan.create({
       userId,
       principal: Number(amount),
       monthlyInterestPercent: Number(monthlyInterestPercent),
-      durationMonths: Number(durationInMonths),
+      durationMonths: durationType === "MONTHS" ? Number(durationValue) : (durationInMonths || 0),
+      durationType: durationType,
+      durationValue: Number(durationValue),
       startDate: new Date(startDate),
+      endDate: new Date(endDate),
       emiAmount: Number(emiAmount),
       nextEMIDueDate: nextEMIDueDate,
       memberName: member.name || "",

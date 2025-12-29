@@ -93,9 +93,7 @@ async function getLoanData(loanId: string) {
     const paymentInfo = paymentMap.get(String(emi.monthNumber)) || { amount: 0, date: null };
     const paidAmount = (emi.paidAmount || 0) + paymentInfo.amount;
     // Serialize payment date to string if it exists
-    const paymentDate = paymentInfo.date 
-      ? (typeof paymentInfo.date === 'object' && paymentInfo.date instanceof Date ? paymentInfo.date.toISOString() : String(paymentInfo.date))
-      : null;
+    const paymentDate = paymentInfo.date ? String(paymentInfo.date) : null;
     
     // Determine status
     let status: "paid" | "pending" = "pending";

@@ -28,6 +28,8 @@ type Loan = {
   principal: number;
   monthlyInterestPercent: number;
   durationMonths: number;
+  durationType?: "MONTHS" | "DAYS";
+  durationValue?: number;
   startDate: string;
   nextEMIDueDate: string | null;
   emiAmount: number;
@@ -164,7 +166,12 @@ export default function LoanProfileClient({ loan }: LoanProfileClientProps) {
             </div>
             <div>
               <p className="text-sm text-[var(--text-secondary)] mb-1">Duration</p>
-              <p className="font-semibold">{loan.durationMonths} months</p>
+              <p className="font-semibold">
+                {loan.durationType === "DAYS" 
+                  ? `${loan.durationValue || loan.durationMonths} days`
+                  : `${loan.durationValue || loan.durationMonths} months`
+                }
+              </p>
             </div>
             <div>
               <p className="text-sm text-[var(--text-secondary)] mb-1">Interest Rate</p>

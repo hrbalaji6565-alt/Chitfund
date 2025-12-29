@@ -6,12 +6,14 @@ export interface ILoanTransaction extends Document {
   loanName?: string;
   emiMonth: number;
   amount: number;
-  paymentMethod: "UPI" | "CASH";
+  paymentMethod: "UPI" | "CASH" | "BANK";
   transactionType: "EMI Payment";
   status: "Paid" | "Pending" | "Failed";
   utr?: string;
   referenceId?: string;
   transactionDate: Date;
+  collectorId?: mongoose.Types.ObjectId | string;
+  collectorName?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -23,12 +25,14 @@ const LoanTransactionSchema = new Schema<ILoanTransaction>(
     loanName: { type: String },
     emiMonth: { type: Number, required: true },
     amount: { type: Number, required: true },
-    paymentMethod: { type: String, enum: ["UPI", "CASH"], required: true },
+    paymentMethod: { type: String, enum: ["UPI", "CASH", "BANK"], required: true },
     transactionType: { type: String, enum: ["EMI Payment"], default: "EMI Payment" },
     status: { type: String, enum: ["Paid", "Pending", "Failed"], default: "Paid" },
     utr: { type: String },
     referenceId: { type: String },
     transactionDate: { type: Date, required: true },
+    collectorId: { type: Schema.Types.ObjectId, ref: "CollectionUser" },
+    collectorName: { type: String },
   },
   { timestamps: true }
 );

@@ -16,6 +16,8 @@ type Loan = {
   principal: number;
   monthlyInterestPercent: number;
   durationMonths: number;
+  durationType?: "MONTHS" | "DAYS";
+  durationValue?: number;
   startDate: string;
   nextEMIDueDate: string | null;
   emiAmount: number;
@@ -249,7 +251,12 @@ export default function LoanListPage() {
                         </td>
                         <td className="py-4 px-6 text-sm">{formatCurrency(loan.principal)}</td>
                         <td className="py-4 px-6 text-sm">{formatCurrency(loan.emiAmount)}</td>
-                        <td className="py-4 px-6 text-sm">{loan.durationMonths} months</td>
+                        <td className="py-4 px-6 text-sm">
+                          {loan.durationType === "DAYS" 
+                            ? `${loan.durationValue || loan.durationMonths} days`
+                            : `${loan.durationValue || loan.durationMonths} months`
+                          }
+                        </td>
                         <td className="py-4 px-6 text-sm">{formatDate(loan.startDate)}</td>
                         <td className="py-4 px-6 text-sm">{formatDate(loan.nextEMIDueDate)}</td>
                         <td className="py-4 px-6">{getStatusBadge(loan)}</td>

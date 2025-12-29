@@ -26,6 +26,7 @@ const Sidebar: React.FC = () => {
   const links = [
     { href: "/collection", label: "Collection Dashboard", icon: <LayoutDashboard size={16} /> },
     { href: "/collection/Collection", label: "Collection", icon: <FileText size={16} /> },
+    { href: "/collection/loan", label: "Loan Collection", icon: <Wallet size={16} /> },
   ];
   const router = useRouter();
 const dispatch = useDispatch<AppDispatch>();

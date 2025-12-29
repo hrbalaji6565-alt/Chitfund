@@ -4,10 +4,12 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+import { calculateEndDate, generateEMISchedule } from "@/app/lib/loanUtils";
 
 type FormValues = {
   userId: string;
-  durationInMonths: number;
+  durationType: "MONTHS" | "DAYS";
+  durationValue: number;
   amount: number;
   monthlyInterestPercent: number;
   startDate: string;
@@ -23,18 +25,14 @@ type EMIRow = {
   emiAmount: number;
 };
 
-// Auto-calculate loan end date based on start date + months
-function autoCalculateEndDate(startDate: string, months: number): string {
-  if (!startDate) return "";
-  const date = new Date(startDate);
-  date.setMonth(date.getMonth() + months);
-  return date.toISOString().split("T")[0];
-}
-
 export default function LoanForm() {
   const router = useRouter();
   const { register, handleSubmit, watch, setValue, reset, formState: { errors } } = useForm<FormValues>({
-    defaultValues: { durationInMonths: 12, monthlyInterestPercent: 1 },
+    defaultValues: { 
+      durationType: "MONTHS",
+      durationValue: 12, 
+      monthlyInterestPercent: 1 
+    },
   });
 
   const [members, setMembers] = useState<Member[]>([]);
@@ -42,8 +40,10 @@ export default function LoanForm() {
   const [membersError, setMembersError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [endDate, setEndDate] = useState<string>("");
+  
   const startDate = watch("startDate");
-  const durationInMonths = watch("durationInMonths");
+  const durationType = watch("durationType");
+  const durationValue = watch("durationValue");
   const amount = watch("amount");
   const monthlyInterestPercent = watch("monthlyInterestPercent");
 
@@ -77,56 +77,80 @@ export default function LoanForm() {
     };
   }, []);
 
-  // Auto-calculate end date when start date or duration changes
+  // Auto-calculate end date when start date, duration type, or duration value changes
   useEffect(() => {
-    if (startDate && durationInMonths) {
-      const calculated = autoCalculateEndDate(startDate, Number(durationInMonths));
+    if (startDate && durationValue && durationType) {
+      const calculated = calculateEndDate(startDate, durationType, Number(durationValue));
       setEndDate(calculated);
     } else {
       setEndDate("");
     }
-  }, [startDate, durationInMonths]);
+  }, [startDate, durationType, durationValue]);
 
   const emi = useMemo(() => {
     const P = Number(amount || 0);
     const R = Number(monthlyInterestPercent || 0) / 100;
-    const N = Number(durationInMonths || 0);
+    const N = Number(durationValue || 0);
+    
     if (!P || !N) return 0;
-    if (R === 0) return P / N;
-    const pow = Math.pow(1 + R, N);
-    const val = (P * R * pow) / (pow - 1);
-    return Number(val.toFixed(2));
-  }, [amount, monthlyInterestPercent, durationInMonths]);
+    
+    if (durationType === "DAYS") {
+      // For day-based loans, calculate simple interest: P + (P * R * (N/30))
+      // Assuming monthly rate, convert to daily rate
+      const dailyRate = R / 30;
+      const totalAmount = P + (P * dailyRate * N);
+      return Number(totalAmount.toFixed(2));
+    } else {
+      // Monthly EMI calculation (existing logic)
+      if (R === 0) return P / N;
+      const pow = Math.pow(1 + R, N);
+      const val = (P * R * pow) / (pow - 1);
+      return Number(val.toFixed(2));
+    }
+  }, [amount, monthlyInterestPercent, durationType, durationValue]);
 
   const previewSchedule = useMemo(() => {
-    const N = Number(durationInMonths || 0);
+    const N = Number(durationValue || 0);
     if (!N || !emi) return [];
-    const arr: EMIRow[] = [];
-    for (let i = 1; i <= N; i++) {
-      arr.push({
-        monthNumber: i,
+    
+    if (durationType === "DAYS") {
+      // Day-based loan - single repayment
+      return [{
+        monthNumber: 1,
         emiAmount: emi,
-      });
+      }];
+    } else {
+      // Monthly EMI schedule
+      const arr: EMIRow[] = [];
+      for (let i = 1; i <= N; i++) {
+        arr.push({
+          monthNumber: i,
+          emiAmount: emi,
+        });
+      }
+      return arr;
     }
-    return arr;
-  }, [emi, durationInMonths]);
+  }, [emi, durationType, durationValue]);
 
   async function onSubmit(data: FormValues) {
     console.log("Form submitted with data:", data);
     setSubmitting(true);
     try {
-      // Build schedule (only monthNumber and emiAmount)
-      const N = Number(data.durationInMonths);
-      const schedule = [];
-      for (let i = 1; i <= N; i++) {
-        schedule.push({ monthNumber: i, emiAmount: emi });
-      }
+      // Generate schedule using utility function
+      const schedule = generateEMISchedule(
+        data.startDate,
+        data.durationType,
+        data.durationValue,
+        emi
+      );
 
       const payloadData = {
         ...data,
         endDate: endDate,
         emiAmount: emi,
         schedule,
+        // Keep backward compatibility
+        durationInMonths: data.durationType === "MONTHS" ? data.durationValue : 0,
       };
 
       console.log("Sending payload to API:", payloadData);
@@ -147,7 +171,8 @@ export default function LoanForm() {
         window.dispatchEvent(new Event("loanCreated"));
         // Reset form after successful submission
         reset({
-          durationInMonths: 12,
+          durationType: "MONTHS",
+          durationValue: 12,
           monthlyInterestPercent: 1,
           userId: "",
           amount: undefined,
@@ -191,9 +216,32 @@ export default function LoanForm() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="block text-sm font-medium">Duration (Months)</label>
-            <input type="number" {...register("durationInMonths", { required: "Duration required", valueAsNumber: true, min: { value: 1, message: "Duration must be > 0" } })} className="mt-1 w-full border rounded px-3 py-2" placeholder="Enter number of months" />
-            {errors.durationInMonths && <p className="text-red-500 text-sm">{errors.durationInMonths.message}</p>}
+            <label className="block text-sm font-medium">Duration Type</label>
+            <select 
+              {...register("durationType", { required: "Duration type is required" })} 
+              className="mt-1 w-full border rounded px-3 py-2"
+            >
+              <option value="MONTHS">Months</option>
+              <option value="DAYS">Days</option>
+            </select>
+            {errors.durationType && <p className="text-red-500 text-sm">{errors.durationType.message}</p>}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium">
+              Duration ({durationType === "MONTHS" ? "Months" : "Days"})
+            </label>
+            <input 
+              type="number" 
+              {...register("durationValue", { 
+                required: "Duration required", 
+                valueAsNumber: true, 
+                min: { value: 1, message: "Duration must be > 0" } 
+              })} 
+              className="mt-1 w-full border rounded px-3 py-2" 
+              placeholder={`Enter number of ${durationType === "MONTHS" ? "months" : "days"}`} 
+            />
+            {errors.durationValue && <p className="text-red-500 text-sm">{errors.durationValue.message}</p>}
           </div>
 
           <div>
@@ -201,18 +249,20 @@ export default function LoanForm() {
             <input type="number" step="0.01" {...register("amount", { required: "Amount required", valueAsNumber: true, min: { value: 1, message: "Amount must be > 0" } })} className="mt-1 w-full border rounded px-3 py-2" />
             {errors.amount && <p className="text-red-500 text-sm">{errors.amount.message}</p>}
           </div>
+        </div>
 
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium">Monthly Interest %</label>
             <input type="number" step="0.01" {...register("monthlyInterestPercent", { required: "Interest required", valueAsNumber: true })} className="mt-1 w-full border rounded px-3 py-2" />
             {errors.monthlyInterestPercent && <p className="text-red-500 text-sm">{errors.monthlyInterestPercent.message}</p>}
           </div>
-        </div>
 
-        <div>
-          <label className="block text-sm font-medium">Start Date</label>
-          <input type="date" {...register("startDate", { required: "Start date required" })} className="mt-1 w-full border rounded px-3 py-2" />
-          {errors.startDate && <p className="text-red-500 text-sm">{errors.startDate.message}</p>}
+          <div>
+            <label className="block text-sm font-medium">Start Date</label>
+            <input type="date" {...register("startDate", { required: "Start date required" })} className="mt-1 w-full border rounded px-3 py-2" />
+            {errors.startDate && <p className="text-red-500 text-sm">{errors.startDate.message}</p>}
+          </div>
         </div>
 
         <div>
@@ -222,22 +272,35 @@ export default function LoanForm() {
         </div>
 
         <div className="bg-gray-50 p-4 rounded">
-              <h3 className="font-medium">EMI Schedule Preview</h3>
-              <p className="text-sm text-gray-600 mb-3">Estimated EMI: <strong>{emi}</strong></p>
+          <h3 className="font-medium">
+            {durationType === "DAYS" ? "Day-based Loan" : "EMI Schedule Preview"}
+          </h3>
+          <p className="text-sm text-gray-600 mb-3">
+            {durationType === "DAYS" 
+              ? `Total Repayment Amount: ₹${emi}` 
+              : `Estimated EMI: ₹${emi}`
+            }
+          </p>
 
           <div className="mt-3 max-h-64 overflow-auto">
             <table className="w-full text-sm border-collapse border border-gray-300">
               <thead>
                 <tr className="bg-gray-200 text-left">
-                  <th className="py-2 px-2 border border-gray-300">Month</th>
-                  <th className="py-2 px-2 border border-gray-300">EMI</th>
+                  <th className="py-2 px-2 border border-gray-300">
+                    {durationType === "DAYS" ? "Payment" : "Month"}
+                  </th>
+                  <th className="py-2 px-2 border border-gray-300">
+                    {durationType === "DAYS" ? "Total Amount" : "EMI"}
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {previewSchedule.map((s) => (
                   <tr key={s.monthNumber} className="hover:bg-gray-100">
-                    <td className="py-2 px-2 border border-gray-300">{s.monthNumber}</td>
-                    <td className="py-2 px-2 border border-gray-300">{s.emiAmount}</td>
+                    <td className="py-2 px-2 border border-gray-300">
+                      {durationType === "DAYS" ? "Final Payment" : s.monthNumber}
+                    </td>
+                    <td className="py-2 px-2 border border-gray-300">₹{s.emiAmount}</td>
                   </tr>
                 ))}
               </tbody>

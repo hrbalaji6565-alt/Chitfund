@@ -10,6 +10,7 @@ export default function BottomNav() {
   const links = [
       { href: "/collection", label: "Collection Dhd", icon: <LayoutDashboard size={16} /> },
       { href: "/collection/Collection", label: "Collection", icon: <FileText size={16} /> },
+      { href: "/collection/loan", label: "Loan Collection", icon: <Wallet size={16} /> },
     ];
 
   return (

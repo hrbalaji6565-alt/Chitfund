@@ -9,6 +9,67 @@ export interface EMIMonth {
 }
 
 /**
+ * Calculate end date based on duration type
+ */
+export function calculateEndDate(startDate: string, durationType: "MONTHS" | "DAYS", durationValue: number): string {
+  if (!startDate) return "";
+  const date = new Date(startDate);
+  
+  if (durationType === "MONTHS") {
+    date.setMonth(date.getMonth() + durationValue);
+  } else if (durationType === "DAYS") {
+    date.setDate(date.getDate() + durationValue);
+  }
+  
+  return date.toISOString().split("T")[0];
+}
+
+/**
+ * Generate EMI schedule based on duration type
+ */
+export function generateEMISchedule(
+  startDate: string,
+  durationType: "MONTHS" | "DAYS",
+  durationValue: number,
+  emiAmount: number
+): Array<{ monthNumber: number; emiAmount: number; dueDate: Date; penalty: number; paidAmount: number; status: string }> {
+  const startDateObj = new Date(startDate);
+  const schedule = [];
+  
+  if (durationType === "MONTHS") {
+    // Monthly EMI schedule (existing logic)
+    for (let i = 1; i <= durationValue; i++) {
+      const dueDate = new Date(startDateObj);
+      dueDate.setMonth(dueDate.getMonth() + i);
+      
+      schedule.push({
+        monthNumber: i,
+        emiAmount: emiAmount,
+        dueDate: dueDate,
+        penalty: 0,
+        paidAmount: 0,
+        status: "pending",
+      });
+    }
+  } else if (durationType === "DAYS") {
+    // Day-based loan - single final repayment
+    const endDate = new Date(startDateObj);
+    endDate.setDate(endDate.getDate() + durationValue);
+    
+    schedule.push({
+      monthNumber: 1,
+      emiAmount: emiAmount,
+      dueDate: endDate,
+      penalty: 0,
+      paidAmount: 0,
+      status: "pending",
+    });
+  }
+  
+  return schedule;
+}
+
+/**
  * Get current month info
  */
 export function getCurrentMonth(): EMIMonth {

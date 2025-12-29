@@ -25,7 +25,10 @@ interface Loan {
   emiAmount: number;
   status: string;
   startDate: string;
+  endDate?: string;
   durationMonths: number;
+  durationType?: "MONTHS" | "DAYS";
+  durationValue?: number;
   monthlyInterestPercent?: number;
   schedule?: EMI[];
 }

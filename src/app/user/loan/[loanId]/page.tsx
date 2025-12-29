@@ -15,11 +15,20 @@ import {
   CheckCircle, 
   Clock, 
   AlertCircle,
-  Smartphone,
-  Banknote
+  Smartphone
 } from "lucide-react";
 import toast from "react-hot-toast";
-import Image from "next/image";
+import dynamic from "next/dynamic";
+
+// Dynamically import QR code component to prevent SSR issues
+const QRCodeSVG = dynamic(() => import('react-qr-code'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-[200px] h-[200px] mx-auto bg-gray-100 rounded flex items-center justify-center">
+      <p className="text-sm text-gray-500">Generating UPI QR...</p>
+    </div>
+  )
+});
 
 interface EMI {
   monthNumber: number;
@@ -49,6 +58,68 @@ interface LoanDetails {
   schedule: EMI[];
 }
 
+// Client-side QR Code component
+const UPIQRCode: React.FC<{ emi: EMI }> = ({ emi }) => {
+  const [mounted, setMounted] = useState(false);
+  const [qrError, setQrError] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return (
+      <div className="w-[200px] h-[200px] mx-auto bg-gray-100 rounded flex items-center justify-center">
+        <p className="text-sm text-gray-500">Generating UPI QR...</p>
+      </div>
+    );
+  }
+
+  try {
+    const upiId = process.env.NEXT_PUBLIC_DEFAULT_UPI || "7489988065@ibl";
+    const payeeName = "Loan EMI"; // Simplified for QR
+    const amount = emi.emiAmount;
+
+    // Validate required data
+    if (!upiId || !amount || amount <= 0) {
+      return (
+        <div className="w-[200px] h-[200px] mx-auto bg-yellow-50 rounded flex items-center justify-center">
+          <p className="text-sm text-yellow-600">QR data unavailable</p>
+        </div>
+      );
+    }
+
+    // Generate UPI string in exact format
+    const upiString = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payeeName)}&am=${encodeURIComponent(amount.toString())}&cu=INR`;
+
+    if (qrError) {
+      return (
+        <div className="w-[200px] h-[200px] mx-auto bg-red-50 rounded flex items-center justify-center">
+          <p className="text-sm text-red-500">QR generation failed</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="w-[200px] h-[200px] mx-auto bg-white p-2 rounded border">
+        <QRCodeSVG
+          value={upiString}
+          size={184}
+          level="M"
+          includeMargin={false}
+        />
+      </div>
+    );
+  } catch (error) {
+    console.error("Error in UPIQRCode component:", error);
+    return (
+      <div className="w-[200px] h-[200px] mx-auto bg-red-50 rounded flex items-center justify-center">
+        <p className="text-sm text-red-500">QR Code Error</p>
+      </div>
+    );
+  }
+};
+
 export default function LoanDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -59,7 +130,7 @@ export default function LoanDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [paymentLoading, setPaymentLoading] = useState<number | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState<EMI | null>(null);
-  const [paymentMode, setPaymentMode] = useState<"CASH" | "UPI">("UPI");
+  const [paymentMode, setPaymentMode] = useState<"UPI">("UPI");
   const [utrNumber, setUtrNumber] = useState("");
   const [showQR, setShowQR] = useState(false);
 
@@ -70,6 +141,14 @@ export default function LoanDetailPage() {
       fetchLoanDetails();
     }
   }, [loanId, token]);
+
+  // Reset QR state when payment modal changes
+  useEffect(() => {
+    if (!showPaymentModal) {
+      setShowQR(false);
+      setUtrNumber("");
+    }
+  }, [showPaymentModal]);
 
   const fetchLoanDetails = async () => {
     if (!token) {
@@ -105,12 +184,10 @@ export default function LoanDetailPage() {
   };
 
   const handlePayEMI = async (emi: EMI) => {
-    if (!paymentMode) {
-      toast.error("Please select a payment mode");
-      return;
-    }
+    // Auto-set payment mode to UPI for user side
+    const userPaymentMode = "UPI";
 
-    if (paymentMode === "UPI" && !utrNumber.trim()) {
+    if (!utrNumber.trim()) {
       toast.error("Please enter UTR number for UPI payment");
       return;
     }
@@ -127,9 +204,9 @@ export default function LoanDetailPage() {
         credentials: "include",
         body: JSON.stringify({
           monthNumber: emi.monthNumber,
-          paymentMode,
+          paymentMode: userPaymentMode,
           amount: emi.emiAmount,
-          utrNumber: paymentMode === "UPI" ? utrNumber : undefined,
+          utrNumber: utrNumber,
         }),
       });
 
@@ -167,6 +244,9 @@ export default function LoanDetailPage() {
   };
 
   const formatCurrency = (amount: number) => {
+    if (typeof amount !== 'number' || isNaN(amount) || amount < 0) {
+      return "₹0";
+    }
     return `₹${amount.toLocaleString("en-IN")}`;
   };
 
@@ -224,6 +304,17 @@ export default function LoanDetailPage() {
     return <Calendar size={16} className="text-gray-400" />;
   };
 
+  // Check if EMI is for current month only
+  const isCurrentMonthEMI = (emi: EMI) => {
+    const currentDate = new Date();
+    const dueDate = new Date(emi.dueDate);
+    
+    return (
+      currentDate.getMonth() === dueDate.getMonth() &&
+      currentDate.getFullYear() === dueDate.getFullYear()
+    );
+  };
+
   // Check if EMI payment is enabled based on current date vs due date
   const isPaymentEnabled = (emi: EMI) => {
     if (emi.status === "paid") return false;
@@ -243,26 +334,48 @@ export default function LoanDetailPage() {
     const dueDate = new Date(emi.dueDate);
     
     if (currentDate < dueDate) {
-      return `Payment will be enabled on ${formatDate(emi.dueDate)}`;
+      return "Not Due Yet";
     }
     
     return "";
   };
 
-  // Generate UPI QR code data
+  // Generate UPI string for QR code
   const generateUPIString = (emi: EMI) => {
-    const upiId = process.env.NEXT_PUBLIC_DEFAULT_UPI || "7489988065@ibl";
-    const payeeName = loan?.memberName || "Loan EMI";
-    const amount = emi.emiAmount;
-    const reference = `${loanId}-Month${emi.monthNumber}`;
-    const note = `EMI Payment - Month ${emi.monthNumber}`;
-    
-    return `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payeeName)}&am=${encodeURIComponent(amount)}&cu=INR&tn=${encodeURIComponent(note)}&tr=${encodeURIComponent(reference)}`;
+    try {
+      // Ensure all required data is available
+      if (!loan || !loanId || !emi || typeof emi.emiAmount !== 'number' || typeof emi.monthNumber !== 'number') {
+        console.warn("Missing required data for UPI string generation");
+        return "";
+      }
+      
+      const upiId = process.env.NEXT_PUBLIC_DEFAULT_UPI || "7489988065@ibl";
+      const payeeName = loan.memberName || "Loan EMI";
+      const amount = emi.emiAmount;
+      
+      // Validate all parameters before creating UPI string
+      if (!upiId || !payeeName || !amount || amount <= 0) {
+        console.warn("Invalid parameters for UPI string generation");
+        return "";
+      }
+      
+      // Generate UPI string in exact format: upi://pay?pa=UPI_ID&pn=USER_NAME&am=AMOUNT&cu=INR
+      return `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payeeName)}&am=${encodeURIComponent(amount.toString())}&cu=INR`;
+    } catch (error) {
+      console.error("Error generating UPI string:", error);
+      return "";
+    }
   };
 
-  const generateQRCodeURL = (emi: EMI) => {
-    const upiString = generateUPIString(emi);
-    return `https://chart.googleapis.com/chart?chs=300x300&cht=qr&chl=${encodeURIComponent(upiString)}&chld=M|0`;
+  // Check if QR code can be generated
+  const canGenerateQR = (emi: EMI) => {
+    if (!loan || !emi) return false;
+    
+    const upiId = process.env.NEXT_PUBLIC_DEFAULT_UPI || "7489988065@ibl";
+    const payeeName = loan.memberName;
+    const amount = emi.emiAmount;
+    
+    return !!(upiId && payeeName && amount && amount > 0);
   };
 
   if (loading) {
@@ -380,7 +493,9 @@ export default function LoanDetailPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {loan.schedule.map((emi) => {
+            {loan.schedule
+              .filter(emi => isCurrentMonthEMI(emi)) // Show only current month EMIs
+              .map((emi) => {
               const paymentEnabled = isPaymentEnabled(emi);
               const helperText = getPaymentHelperText(emi);
               
@@ -438,7 +553,7 @@ export default function LoanDetailPage() {
                           disabled
                           className="min-w-[80px] opacity-50"
                         >
-                          Pay EMI
+                          Not Due Yet
                         </Button>
                       </div>
                     )}
@@ -473,87 +588,64 @@ export default function LoanDetailPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Payment Mode
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => {
-                      setPaymentMode("UPI");
-                      setShowQR(false);
-                    }}
-                    className={`p-3 border rounded-lg flex items-center justify-center gap-2 ${
-                      paymentMode === "UPI"
-                        ? "border-blue-500 bg-blue-50 text-blue-700"
-                        : "border-gray-300 hover:border-gray-400"
-                    }`}
-                  >
-                    <Smartphone size={16} />
-                    UPI
-                  </button>
-                  <button
-                    onClick={() => {
-                      setPaymentMode("CASH");
-                      setShowQR(false);
-                    }}
-                    className={`p-3 border rounded-lg flex items-center justify-center gap-2 ${
-                      paymentMode === "CASH"
-                        ? "border-blue-500 bg-blue-50 text-blue-700"
-                        : "border-gray-300 hover:border-gray-400"
-                    }`}
-                  >
-                    <Banknote size={16} />
-                    Cash
-                  </button>
+                <p className="text-sm text-gray-600">Payment Mode: UPI Only</p>
+                <div className="mt-2 p-3 border border-blue-200 rounded-lg bg-blue-50 flex items-center justify-center gap-2 text-blue-700">
+                  <Smartphone size={16} />
+                  UPI Payment
                 </div>
               </div>
 
-              {paymentMode === "UPI" && (
-                <>
-                  <div>
-                    <Button
-                      onClick={() => setShowQR(!showQR)}
-                      className="w-full mb-3"
-                      variant="outline"
+              {/* UPI Payment Section - Always shown since it's UPI only */}
+              <div>
+                <Button
+                  onClick={() => setShowQR(!showQR)}
+                  className="w-full mb-3"
+                  variant="outline"
+                  disabled={!loan || !showPaymentModal || !canGenerateQR(showPaymentModal)}
+                >
+                  {showQR ? "Hide QR Code" : "Generate UPI QR Code"}
+                </Button>
+                {(!loan || !showPaymentModal || !canGenerateQR(showPaymentModal)) && (
+                  <p className="text-xs text-gray-500 text-center mt-1">
+                    QR code will be available when payment data is ready
+                  </p>
+                )}
+              </div>
+
+              {showQR && showPaymentModal && canGenerateQR(showPaymentModal) && (
+                <div className="border rounded-lg p-4 bg-gray-50">
+                  <div className="text-center mb-3">
+                    <p className="text-sm font-medium text-gray-700 mb-2">Scan to Pay via UPI</p>
+                    <React.Suspense 
+                      fallback={
+                        <div className="w-[200px] h-[200px] mx-auto bg-gray-100 rounded flex items-center justify-center">
+                          <p className="text-sm text-gray-500">Loading QR...</p>
+                        </div>
+                      }
                     >
-                      {showQR ? "Hide QR Code" : "Generate UPI QR Code"}
-                    </Button>
+                      <UPIQRCode emi={showPaymentModal} />
+                    </React.Suspense>
                   </div>
-
-                  {showQR && (
-                    <div className="border rounded-lg p-4 bg-gray-50">
-                      <div className="text-center mb-3">
-                        <p className="text-sm font-medium text-gray-700 mb-2">Scan to Pay via UPI</p>
-                        <Image
-                          src={generateQRCodeURL(showPaymentModal)}
-                          alt="UPI QR Code"
-                          width={200}
-                          height={200}
-                          className="mx-auto rounded"
-                        />
-                      </div>
-                      <div className="text-xs text-gray-600 space-y-1">
-                        <p><strong>Amount:</strong> {formatCurrency(showPaymentModal.emiAmount)}</p>
-                        <p><strong>Reference:</strong> {loanId}-Month{showPaymentModal.monthNumber}</p>
-                        <p><strong>Note:</strong> EMI Payment - Month {showPaymentModal.monthNumber}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      UTR Number
-                    </label>
-                    <input
-                      type="text"
-                      value={utrNumber}
-                      onChange={(e) => setUtrNumber(e.target.value)}
-                      placeholder="Enter UTR number after payment"
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
+                  <div className="text-xs text-gray-600 space-y-1">
+                    <p><strong>Amount:</strong> {formatCurrency(showPaymentModal.emiAmount)}</p>
+                    <p><strong>UPI ID:</strong> {process.env.NEXT_PUBLIC_DEFAULT_UPI || "7489988065@ibl"}</p>
+                    <p><strong>Payee:</strong> {loan?.memberName || "Loan EMI"}</p>
                   </div>
-                </>
+                </div>
               )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  UTR Number
+                </label>
+                <input
+                  type="text"
+                  value={utrNumber}
+                  onChange={(e) => setUtrNumber(e.target.value)}
+                  placeholder="Enter UTR number after payment"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
 
               <div className="flex gap-3 pt-4">
                 <Button

@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import dbConnect from "@/app/lib/mongodb";
-import Loan from "@/app/models/loanModel";
 import { verifyToken } from "@/app/lib/jwt";
+import Member from "@/app/models/Member";
+import Loan from "@/app/models/loanModel";
+
 
 function parseCookies(cookieHeader: string | null) {
   const map: Record<string, string> = {};

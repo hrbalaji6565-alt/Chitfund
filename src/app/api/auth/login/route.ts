@@ -9,19 +9,34 @@ export async function POST(req: Request) {
   try {
     const { userId, password } = await req.json();
 
+    console.log("Login attempt:", { userId, password: password ? "***" : "missing" });
+
     if (!userId || !password) {
+      console.log("Missing credentials");
       return NextResponse.json({ success: false, message: "UserID and password required" }, { status: 400 });
     }
 
     await dbConnect();
+    console.log("Database connected");
 
     const member = await Member.findOne({ userId });
-    if (!member) return NextResponse.json({ success: false, message: "Invalid credentials" }, { status: 401 });
+    console.log("Member found:", member ? { id: member._id, userId: member.userId, name: member.name } : "No member found");
+    
+    if (!member) {
+      console.log("Member not found for userId:", userId);
+      return NextResponse.json({ success: false, message: "Invalid credentials" }, { status: 401 });
+    }
 
     const match = await bcrypt.compare(password, member.password);
-    if (!match) return NextResponse.json({ success: false, message: "Invalid credentials" }, { status: 401 });
+    console.log("Password match:", match);
+    
+    if (!match) {
+      console.log("Password mismatch for userId:", userId);
+      return NextResponse.json({ success: false, message: "Invalid credentials" }, { status: 401 });
+    }
 
     const token = signToken({ id: member._id, userId: member.userId, role: member.role });
+    console.log("Token generated successfully");
 
     const res = NextResponse.json({
       success: true,
@@ -45,6 +60,7 @@ export async function POST(req: Request) {
       maxAge: 60 * 60 * 24 * 7, // 7 days
     });
 
+    console.log("Login successful for userId:", userId);
     return res;
   } catch (err) {
     console.error("POST /api/auth/login error:", err);

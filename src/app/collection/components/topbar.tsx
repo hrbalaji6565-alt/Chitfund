@@ -61,10 +61,10 @@ export default function Topbar() {
       </div>
 
       {/* Notification Button */}
-      <Button variant="ghost" size="icon" className="relative rounded-full hover:bg-[var(--bg-highlight)]">
+      {/* <Button variant="ghost" size="icon" className="relative rounded-full hover:bg-[var(--bg-highlight)]">
         <Bell className="w-5 h-5 text-[var(--text-secondary)]" />
         <span className="absolute top-1 right-1 w-2 h-2 bg-[var(--color-secondary)] rounded-full"></span>
-      </Button>
+      </Button> */}
 
       {/* User Dropdown */}
       <DropdownMenu>
