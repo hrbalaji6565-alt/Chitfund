@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, Users, Wallet, FileText, Funnel } from "lucide-react";
+import { LayoutDashboard, Users, Wallet, FileText, Funnel, Banknote } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -9,8 +9,8 @@ export default function BottomNav() {
 
   const links = [
       { href: "/collection", label: "Collection Dhd", icon: <LayoutDashboard size={16} /> },
-      { href: "/collection/Collection", label: "Collection", icon: <FileText size={16} /> },
-      { href: "/collection/loan", label: "Loan Collection", icon: <Wallet size={16} /> },
+      { href: "/collection/transactions", label: "Transaction", icon: <Banknote size={16} /> },
+      { href: "/collection/loan", label: "Loan Coll", icon: <Wallet size={16} /> },
     ];
 
   return (

@@ -137,9 +137,9 @@ const computeMetaFromGroup = (
     1,
     safeNum(
       group.totalMembers ??
-        (Array.isArray(group.members)
-          ? (group.members as unknown[]).length
-          : 0),
+      (Array.isArray(group.members)
+        ? (group.members as unknown[]).length
+        : 0),
     ),
   );
   const monthlyFromModel = safeNum(group.monthlyInstallment);
@@ -149,8 +149,8 @@ const computeMetaFromGroup = (
     monthlyFromModel > 0
       ? monthlyFromModel * totalMembers
       : chitValue > 0
-      ? Math.round(chitValue / totalMonths)
-      : 0;
+        ? Math.round(chitValue / totalMonths)
+        : 0;
   const perMemberInstallment =
     monthlyFromModel > 0
       ? Math.round(monthlyFromModel)
@@ -172,8 +172,8 @@ function AdminChitsPage() {
   const chitGroups = useSelector(
     (s: RootState) =>
       (s as unknown as Record<string, unknown>)["chitGroups"] as
-        | Record<string, unknown>
-        | undefined,
+      | Record<string, unknown>
+      | undefined,
   );
 
   const groups: ChitGroup[] = useMemo(() => {
@@ -182,10 +182,10 @@ function AdminChitsPage() {
       (Array.isArray(chitGroups.list)
         ? chitGroups.list
         : Array.isArray(chitGroups.items)
-        ? chitGroups.items
-        : Array.isArray(chitGroups.groups)
-        ? chitGroups.groups
-        : []) ?? [];
+          ? chitGroups.items
+          : Array.isArray(chitGroups.groups)
+            ? chitGroups.groups
+            : []) ?? [];
     return (arr as unknown[]).filter(isRecord) as unknown as ChitGroup[];
   }, [chitGroups]);
 
@@ -198,10 +198,10 @@ function AdminChitsPage() {
     const arr = Array.isArray(ms?.list)
       ? ms.list
       : Array.isArray(ms?.items)
-      ? ms.items
-      : Array.isArray(ms?.members)
-      ? ms.members
-      : [];
+        ? ms.items
+        : Array.isArray(ms?.members)
+          ? ms.members
+          : [];
     return (arr as unknown[]).map((it) => {
       if (isRecord(it)) {
         const baseId = String(it._id ?? it.id ?? "");
@@ -370,8 +370,8 @@ function AdminChitsPage() {
         setErrorText(
           isRecord(pj)
             ? String(
-                pj.error ?? (pj as UnknownRecord).message ?? pRes.statusText,
-              )
+              pj.error ?? (pj as UnknownRecord).message ?? pRes.statusText,
+            )
             : pRes.statusText,
         );
         setLoading(false);
@@ -450,8 +450,8 @@ function AdminChitsPage() {
           typeof pr.date === "string"
             ? pr.date
             : typeof pr.createdAt === "string"
-            ? pr.createdAt
-            : undefined;
+              ? pr.createdAt
+              : undefined;
 
         const memberIdRaw: unknown = (() => {
           if (pr.memberId) return pr.memberId;
@@ -481,14 +481,14 @@ function AdminChitsPage() {
           typeof pr.type === "string"
             ? pr.type
             : typeof pr.mode === "string"
-            ? pr.mode
-            : undefined;
+              ? pr.mode
+              : undefined;
         const reference =
           typeof pr.reference === "string"
             ? pr.reference
             : typeof pr.utr === "string"
-            ? pr.utr
-            : undefined;
+              ? pr.utr
+              : undefined;
 
         const allocation = isRecord(pr.allocation)
           ? { monthIndex: safeNum(pr.allocation.monthIndex) || undefined }
@@ -498,12 +498,12 @@ function AdminChitsPage() {
           pr.allocationDetails,
         )
           ? (pr.allocationDetails as unknown[])
-              .filter(isRecord)
-              .map((ad) => ({
-                monthIndex: safeNum(ad.monthIndex),
-                principalPaid: safeNum(ad.principalPaid),
-                penaltyPaid: safeNum(ad.penaltyPaid),
-              }))
+            .filter(isRecord)
+            .map((ad) => ({
+              monthIndex: safeNum(ad.monthIndex),
+              principalPaid: safeNum(ad.principalPaid),
+              penaltyPaid: safeNum(ad.penaltyPaid),
+            }))
           : undefined;
 
         const isApproved =
@@ -599,8 +599,8 @@ function AdminChitsPage() {
             toStr(b._id ?? b.id ?? Math.random().toString(36).slice(2)) ?? "";
           const memberId = toStr(
             b.memberId ??
-              (isRecord(b.member) ? b.member._id : undefined) ??
-              "UNKNOWN",
+            (isRecord(b.member) ? b.member._id : undefined) ??
+            "UNKNOWN",
           )!;
           const memberNameFromMember =
             isRecord(b.member) && typeof b.member.name === "string"
@@ -617,15 +617,15 @@ function AdminChitsPage() {
 
           const discountOffered = safeNum(
             (b as { discount?: unknown }).discount ??
-              b.discountOffered ??
-              b.amount,
+            b.discountOffered ??
+            b.amount,
           );
           const createdAt =
             typeof b.createdAt === "string"
               ? b.createdAt
               : typeof b.date === "string"
-              ? b.date
-              : undefined;
+                ? b.date
+                : undefined;
 
           return { id, memberId, memberName, discountOffered, createdAt };
         })
@@ -653,14 +653,14 @@ function AdminChitsPage() {
       const totalMembersCount =
         group != null
           ? Math.max(
-              1,
-              safeNum(
-                group.totalMembers ??
-                  (Array.isArray(group.members)
-                    ? (group.members as unknown[]).length
-                    : 0),
-              ),
-            )
+            1,
+            safeNum(
+              group.totalMembers ??
+              (Array.isArray(group.members)
+                ? (group.members as unknown[]).length
+                : 0),
+            ),
+          )
           : 0;
 
       if (auctionRaw) {
@@ -668,125 +668,72 @@ function AdminChitsPage() {
 
         const winningMemberId = String(
           arc.winningMemberId ??
-            arc.winningMember ??
-            arc.winner ??
-            "NO_WINNER",
+          arc.winningMember ??
+          arc.winner ??
+          "NO_WINNER",
         );
 
-        let winningBidAmount = safeNum(
+        const winningBidAmount = safeNum(
           (arc as { winningBidAmount?: unknown }).winningBidAmount ??
-            (arc as { totalBidAmount?: unknown }).totalBidAmount ??
-            (arc as { bidAmount?: unknown }).bidAmount ??
-            0,
+          (arc as { totalBidAmount?: unknown }).totalBidAmount ??
+          (arc as { bidAmount?: unknown }).bidAmount ??
+          0,
         );
 
-        let winningDiscount = safeNum(
-          (arc as { winningDiscount?: unknown }).winningDiscount ??
-            (arc as { discountOffered?: unknown }).discountOffered ??
-            0,
-        );
-
-        let adminCommissionAmount = safeNum(
-          (arc as { adminCommissionAmount?: unknown }).adminCommissionAmount,
-        );
-        let totalPot = safeNum(
-          (arc as { totalPot?: unknown }).totalPot ??
+        // ACTUAL CHIT VALUE (AC)
+        const totalPot =
+          safeNum(
+            (arc as { totalPot?: unknown }).totalPot ??
             baseExpectedMonthlyTotal,
+          ) || baseExpectedMonthlyTotal;
+
+        // ADMIN COMMISSION (4%)
+        const adminCommissionAmount = Math.round(totalPot * 0.04);
+
+        // EXTRA PAID BY BIDDER (BA - AC)
+        const extraPaid = Math.max(0, winningBidAmount - totalPot);
+
+        // CUSTOMER PROFIT (EXTRA - ADMIN)
+        const winningDiscount = Math.max(
+          0,
+          extraPaid ,
         );
 
-        if (!totalPot && baseExpectedMonthlyTotal > 0) {
-          totalPot = baseExpectedMonthlyTotal;
-        }
-
-        if (!adminCommissionAmount && totalPot > 0) {
-          adminCommissionAmount = Math.round(totalPot * 0.04);
-        }
-
-        // if discount missing but bidAmount present, derive discount
-        if (!winningDiscount && winningBidAmount > 0 && totalPot > 0) {
-          const basePlusAdmin = totalPot + adminCommissionAmount;
-          const diff = winningBidAmount - basePlusAdmin;
-          winningDiscount = diff > 0 ? diff : 0;
-        }
-
-        // if bidAmount missing but others present, reconstruct
-        if (!winningBidAmount && totalPot > 0) {
-          winningBidAmount = totalPot + adminCommissionAmount + winningDiscount;
-        }
-
-        let winningPayout = safeNum(
-          (arc as { winningPayout?: unknown }).winningPayout,
+        // PAYOUT TO AUCTION WINNER (AC - EXTRA)
+        const winningPayout = Math.max(
+          0,
+          totalPot - extraPaid - adminCommissionAmount,
         );
-        if (!winningPayout && totalPot > 0) {
-          winningPayout = Math.max(
-            0,
-            totalPot - winningDiscount - adminCommissionAmount,
-          );
-        }
 
-        const distributedToMembers: Array<{
-          memberId: string;
-          amount: number;
-        }> = [];
-
-        if (Array.isArray(arc.distributedToMembers)) {
-          for (const d of arc.distributedToMembers) {
-            if (isRecord(d)) {
-              distributedToMembers.push({
-                memberId: String(d.memberId ?? d.id ?? "UNKNOWN"),
-                amount: safeNum(d.amount),
-              });
-            }
-          }
-        }
-
-        let perMemberDiscount: number | undefined;
-        if (distributedToMembers.length > 0) {
-          const totalDist = distributedToMembers.reduce(
-            (sum, d) => sum + d.amount,
-            0,
-          );
-          const uniqueMembersCount = new Set(
-            distributedToMembers.map((d) => d.memberId),
-          ).size;
-          perMemberDiscount =
-            uniqueMembersCount > 0
-              ? Math.round(totalDist / uniqueMembersCount)
-              : undefined;
-        }
-
-        if (
-          (!perMemberDiscount || perMemberDiscount <= 0) &&
-          winningDiscount > 0 &&
+        // PER MEMBER DISCOUNT
+        const perMemberDiscount =
           totalMembersCount > 0
-        ) {
-          perMemberDiscount = Math.round(
-            winningDiscount / totalMembersCount,
-          );
-        }
+            ? Math.round(winningDiscount / totalMembersCount)
+            : 0;
 
         auctionDisplay = {
           winningMemberId,
-          winningDiscount,
-          winningPayout,
-          distributedToMembers,
-          perMemberDiscount,
-          adminCommissionAmount,
-          totalPot,
           winningBidAmount,
+          winningDiscount,       // total customer profit
+          winningPayout,         // correct payout
+          adminCommissionAmount, // always 4%
+          totalPot,              // chit value
+          perMemberDiscount,     // used for installment reduction
+          distributedToMembers: [],
         };
       }
+
 
       const baseMeta: PaymentsMeta =
         group != null
           ? computeMetaFromGroup(group, monthlyCollected)
           : {
-              expectedMonthlyTotal: baseExpectedMonthlyTotal,
-              perMemberInstallment: 0,
-              currentMonthIndex,
-              totalMembers: 0,
-              monthlyCollected,
-            };
+            expectedMonthlyTotal: baseExpectedMonthlyTotal,
+            perMemberInstallment: 0,
+            currentMonthIndex,
+            totalMembers: 0,
+            monthlyCollected,
+          };
 
       let effectiveMeta = baseMeta;
 
@@ -796,7 +743,7 @@ function AdminChitsPage() {
           perMemberInstallment: Math.max(
             0,
             baseMeta.perMemberInstallment -
-              auctionDisplay.perMemberDiscount,
+            auctionDisplay.perMemberDiscount,
           ),
         };
       }
@@ -816,8 +763,8 @@ function AdminChitsPage() {
 
   const getGroupById = (id: string | null) =>
     (groups ?? []).find((g) => String(g._id ?? g.id) === id) as
-      | ChitGroup
-      | undefined;
+    | ChitGroup
+    | undefined;
 
   const memberDisplay = (id?: string) =>
     id ? memberNamesMap[id] ?? id : "Unknown";
@@ -863,10 +810,10 @@ function AdminChitsPage() {
       if (!res.ok || !success) {
         const msg = isRecord(json)
           ? String(
-              (json as { error?: unknown }).error ??
-                (json as { message?: unknown }).message ??
-                res.statusText,
-            )
+            (json as { error?: unknown }).error ??
+            (json as { message?: unknown }).message ??
+            res.statusText,
+          )
           : res.statusText;
         throw new Error(msg);
       }
@@ -903,10 +850,10 @@ function AdminChitsPage() {
       if (!res.ok || !success) {
         const msg = isRecord(json)
           ? String(
-              (json as { error?: unknown }).error ??
-                (json as { message?: unknown }).message ??
-                res.statusText,
-            )
+            (json as { error?: unknown }).error ??
+            (json as { message?: unknown }).message ??
+            res.statusText,
+          )
           : res.statusText;
         throw new Error(msg);
       }
@@ -941,10 +888,10 @@ function AdminChitsPage() {
       if (!res.ok || !success) {
         const msg = isRecord(json)
           ? String(
-              (json as { error?: unknown }).error ??
-                (json as { message?: unknown }).message ??
-                res.statusText,
-            )
+            (json as { error?: unknown }).error ??
+            (json as { message?: unknown }).message ??
+            res.statusText,
+          )
           : res.statusText;
         setErrorText(msg);
         setAuctionRunning(false);
@@ -980,25 +927,28 @@ function AdminChitsPage() {
       return;
     }
 
-    const basePot =
-      meta.expectedMonthlyTotal || auction?.totalPot || 0;
-    const adminCommission =
-      auction?.adminCommissionAmount ?? Math.round(basePot * 0.04);
+    const basePot = meta.expectedMonthlyTotal;
+    const adminCommission = Math.round(basePot * 0.04);
+
+    // minimum allowed bid = chit + admin
     const minBid = basePot + adminCommission;
 
     if (manualBidAmount < minBid) {
       setErrorText(
-        `Manual bid must be at least ₹${fmt(minBid)} (pot + admin commission).`,
+        `Final bid must be at least ₹${fmt(
+          minBid,
+        )} (₹${fmt(basePot)} chit + ₹${fmt(adminCommission)} admin).`,
       );
       return;
     }
 
+
     const currentTopDiscount = bids.length
       ? bids.reduce(
-          (max, b) =>
-            b.discountOffered > max ? b.discountOffered : max,
-          0,
-        )
+        (max, b) =>
+          b.discountOffered > max ? b.discountOffered : max,
+        0,
+      )
       : 0;
 
     const manualDiscount = manualBidAmount - minBid;
@@ -1044,10 +994,10 @@ function AdminChitsPage() {
       if (!res.ok) {
         const msg = isRecord(json)
           ? String(
-              (json as { error?: unknown }).error ??
-                (json as { message?: unknown }).message ??
-                res.statusText,
-            )
+            (json as { error?: unknown }).error ??
+            (json as { message?: unknown }).message ??
+            res.statusText,
+          )
           : res.statusText;
         throw new Error(msg);
       }
@@ -1159,11 +1109,10 @@ function AdminChitsPage() {
                       <motion.div
                         initial={{ width: 0 }}
                         animate={{
-                          width: `${
-                            (fund.collectedAmount /
+                          width: `${(fund.collectedAmount /
                               (fund.totalAmount || 1)) *
                             100
-                          }%`,
+                            }%`,
                         }}
                         style={{
                           height: "100%",
@@ -1194,16 +1143,16 @@ function AdminChitsPage() {
                               1,
                               safeNum(
                                 raw?.totalMembers ??
-                                  (Array.isArray(raw?.members)
-                                    ? (raw?.members as unknown[]).length
-                                    : 0),
+                                (Array.isArray(raw?.members)
+                                  ? (raw?.members as unknown[]).length
+                                  : 0),
                               ),
                             );
                             const totalMonths = Math.max(
                               1,
                               safeNum(
                                 raw?.totalMonths ??
-                                  fund.numberOfInstallments,
+                                fund.numberOfInstallments,
                               ),
                             );
                             if (monthlyFromModel > 0) {
@@ -1212,7 +1161,7 @@ function AdminChitsPage() {
                             const perMember = Math.round(
                               (Number(fund.totalAmount ?? 0) /
                                 totalMonths) /
-                                totalMembers,
+                              totalMembers,
                             );
                             return `₹${fmt(perMember)}`;
                           })()}
@@ -1250,8 +1199,8 @@ function AdminChitsPage() {
                   {meta.totalMembers}
                   {auction?.perMemberDiscount
                     ? ` • Per-member discount this month: ₹${fmt(
-                        auction.perMemberDiscount,
-                      )}`
+                      auction.perMemberDiscount,
+                    )}`
                     : ""}
                 </p>
                 {biddingStatusMsg && (
@@ -1359,8 +1308,8 @@ function AdminChitsPage() {
                           paid >= expected
                             ? "Paid in full"
                             : paid === 0
-                            ? "Unpaid"
-                            : "Partial";
+                              ? "Unpaid"
+                              : "Partial";
                         return (
                           <tr key={mid} className="border-t">
                             <td className="p-2">{name}</td>
@@ -1373,8 +1322,8 @@ function AdminChitsPage() {
                                   statusText === "Paid in full"
                                     ? "font-semibold text-green-600"
                                     : statusText === "Partial"
-                                    ? "font-semibold text-yellow-600"
-                                    : "font-semibold text-red-600"
+                                      ? "font-semibold text-yellow-600"
+                                      : "font-semibold text-red-600"
                                 }
                               >
                                 {statusText}
@@ -1459,8 +1408,8 @@ function AdminChitsPage() {
                               <td key={m.idx} className="p-2 text-sm">
                                 {r.months.get(m.idx)
                                   ? `₹${fmt(
-                                      Number(r.months.get(m.idx) ?? 0),
-                                    )}`
+                                    Number(r.months.get(m.idx) ?? 0),
+                                  )}`
                                   : "-"}
                               </td>
                             ))}
@@ -1615,9 +1564,9 @@ function AdminChitsPage() {
                         (≈4%): ₹
                         {fmt(
                           auction?.adminCommissionAmount ??
-                            Math.round(
-                              meta.expectedMonthlyTotal * 0.04,
-                            ),
+                          Math.round(
+                            meta.expectedMonthlyTotal * 0.04,
+                          ),
                         )}
                       </p>
                     )}
@@ -1668,8 +1617,8 @@ function AdminChitsPage() {
                           <td className="p-2">
                             {b.createdAt
                               ? new Date(
-                                  b.createdAt,
-                                ).toLocaleString()
+                                b.createdAt,
+                              ).toLocaleString()
                               : ""}
                           </td>
                         </tr>
@@ -1712,7 +1661,10 @@ function AdminChitsPage() {
                         Winning bid amount
                       </div>
                       <div className="font-semibold">
-                        ₹{fmt(auction.winningBidAmount ?? 0)}
+                        ₹{fmt(
+                          (auction?.winningBidAmount ?? 0) +
+                          (auction?.adminCommissionAmount ?? 0)
+                        )}
                       </div>
                     </div>
                     <div>
@@ -1725,15 +1677,15 @@ function AdminChitsPage() {
                     </div>
                     {typeof auction.adminCommissionAmount ===
                       "number" && (
-                      <div>
-                        <div className="text-xs text-gray-500">
-                          Admin commission
+                        <div>
+                          <div className="text-xs text-gray-500">
+                            Admin commission
+                          </div>
+                          <div className="font-semibold">
+                            ₹{fmt(auction.adminCommissionAmount)}
+                          </div>
                         </div>
-                        <div className="font-semibold">
-                          ₹{fmt(auction.adminCommissionAmount)}
-                        </div>
-                      </div>
-                    )}
+                      )}
                   </div>
 
                   {/* NEW: breakdown like your 1,00,000 / 1,10,000 example */}
@@ -1746,7 +1698,7 @@ function AdminChitsPage() {
                       <span className="font-semibold">
                         ₹{fmt(
                           auction.totalPot ??
-                            meta.expectedMonthlyTotal,
+                          meta.expectedMonthlyTotal,
                         )}
                       </span>
                     </div>
@@ -1767,10 +1719,10 @@ function AdminChitsPage() {
                       <span className="font-semibold">
                         ₹{fmt(
                           auction.adminCommissionAmount ??
-                            Math.round(
-                              (auction.totalPot ??
-                                meta.expectedMonthlyTotal) * 0.04,
-                            ),
+                          Math.round(
+                            (auction.totalPot ??
+                              meta.expectedMonthlyTotal) * 0.04,
+                          ),
                         )}
                       </span>
                     </div>
@@ -1785,13 +1737,13 @@ function AdminChitsPage() {
                       <span className="font-semibold">
                         ₹{fmt(
                           auction.perMemberDiscount ??
-                            (auction.winningDiscount > 0 &&
+                          (auction.winningDiscount > 0 &&
                             meta.totalMembers > 0
-                              ? Math.round(
-                                  auction.winningDiscount /
-                                    meta.totalMembers,
-                                )
-                              : 0),
+                            ? Math.round(
+                              auction.winningDiscount /
+                              meta.totalMembers,
+                            )
+                            : 0),
                         )}
                       </span>
                     </div>
@@ -1808,7 +1760,7 @@ function AdminChitsPage() {
                       Distribution of discount
                     </div>
                     {!auction.distributedToMembers ||
-                    !auction.distributedToMembers.length ? (
+                      !auction.distributedToMembers.length ? (
                       <div className="text-xs text-gray-500">
                         No distribution data.
                       </div>

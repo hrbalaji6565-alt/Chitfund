@@ -195,7 +195,7 @@ export default function CollectionPage() {
         .filter((r) => r.pending > 0)
         .map((r) => ({
           ...r,
-          payNow: r.pending,
+          payNow: 0,
           mode: "cash",
           date: new Date().toISOString().split("T")[0],
         }));
@@ -373,14 +373,7 @@ export default function CollectionPage() {
                   {collector.active ? "Active" : "Inactive"}
                 </span>
               </div>
-              {collector.assignedGroupIds && (
-                <div>
-                  <span className="text-gray-500">Assigned groups:</span>{" "}
-                  <span className="font-semibold">
-                    {collector.assignedGroupIds.length}
-                  </span>
-                </div>
-              )}
+              
             </div>
           )}
         </CardContent>
@@ -450,7 +443,7 @@ export default function CollectionPage() {
           )}
 
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[1000px] text-sm">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="py-3 px-4 text-left">Member</th>
@@ -499,7 +492,7 @@ export default function CollectionPage() {
                           type="number"
                           min={0}
                           max={row.pending}
-                          value={row.payNow}
+                          value={row.payNow || ""}
                           onChange={(e) => {
                             const v = e.target.value.trim();
                             const n = v ? Number(v) : 0;

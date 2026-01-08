@@ -91,3 +91,52 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: (err as Error).message }, { status: 500 });
   }
 }
+export async function DELETE(req: NextRequest) {
+  try {
+    await dbConnect();
+
+    const body = await req.json().catch(() => ({}));
+    const paymentId = String(body.paymentId ?? "");
+
+    if (!paymentId) {
+      return NextResponse.json(
+        { success: false, error: "paymentId required" },
+        { status: 400 },
+      );
+    }
+
+    const payment = await Payment.findById(paymentId);
+    if (!payment) {
+      return NextResponse.json(
+        { success: false, error: "Payment not found" },
+        { status: 404 },
+      );
+    }
+
+    const amount = Number(payment.amount ?? 0) || 0;
+    const groupId = String(payment.groupId ?? "");
+
+    // 🔁 IMPORTANT: if approved, reverse group collected amount
+    if (payment.status === "approved" && amount > 0 && groupId) {
+      await Group.findByIdAndUpdate(groupId, {
+        $inc: { collectedAmount: -amount },
+      }).lean();
+    }
+
+    await Payment.findByIdAndDelete(paymentId);
+
+    return NextResponse.json({
+      success: true,
+      message:
+        payment.status === "approved"
+          ? "Approved payment deleted and collection reversed"
+          : "Payment deleted",
+    });
+  } catch (err) {
+    console.error("DELETE /api/admin/transactions error:", err);
+    return NextResponse.json(
+      { success: false, error: (err as Error).message },
+      { status: 500 },
+    );
+  }
+}

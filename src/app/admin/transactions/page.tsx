@@ -745,6 +745,43 @@ export default function AdminTransactionsPage(): React.ReactElement {
       }),
     [payments, search, memberNameMap],
   );
+  async function handleDelete(paymentId: string) {
+    const confirmDelete = window.confirm(
+      "Are you sure you want to delete this transaction? This action cannot be undone.",
+    );
+    if (!confirmDelete) return;
+
+    setActionLoading((s) => ({ ...s, [paymentId]: true }));
+    setError(null);
+
+    try {
+      const res = await fetch("/api/admin/transactions", {
+        method: "DELETE",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId }),
+      });
+
+      const j: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        let msg = res.statusText;
+        if (typeof j === "object" && j && "error" in j) {
+          msg = String((j as any).error);
+        }
+        throw new Error(msg);
+      }
+
+      setPayments((prev) =>
+        prev.filter((p) => p._id !== paymentId),
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Delete failed",
+      );
+    } finally {
+      setActionLoading((s) => ({ ...s, [paymentId]: false }));
+    }
+  }
 
   return (
     <div className="p-6 min-h-screen bg-[var(--bg-main)]">
@@ -952,46 +989,37 @@ export default function AdminTransactionsPage(): React.ReactElement {
                   </div>
                   <div className="font-mono text-xs">{p._id}</div>
 
-                  <div className="mt-2 flex gap-2">
-                    {isApproved ? (
-                      <div className="text-xs text-green-600 font-medium">
-                        Approved
-                      </div>
-                    ) : (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {!isApproved && (
                       <>
                         <Button
-                          onClick={() =>
-                            handleAction(p._id, true)
-                          }
+                          onClick={() => handleAction(p._id, true)}
                           className="bg-green-600 hover:bg-green-700"
                           disabled={itemLoading}
                         >
-                          {itemLoading ? (
-                            "…"
-                          ) : (
-                            <>
-                              <Check /> Approve
-                            </>
-                          )}
+                          <Check /> Approve
                         </Button>
+
                         <Button
-                          onClick={() =>
-                            handleAction(p._id, false)
-                          }
+                          onClick={() => handleAction(p._id, false)}
                           className="bg-red-600 hover:bg-red-700"
                           disabled={itemLoading}
                         >
-                          {itemLoading ? (
-                            "…"
-                          ) : (
-                            <>
-                              <X /> Reject
-                            </>
-                          )}
+                          <X /> Reject
                         </Button>
                       </>
                     )}
+
+                    <Button
+                      variant="outline"
+                      className="border-red-500 text-red-600 hover:bg-red-50"
+                      disabled={itemLoading}
+                      onClick={() => handleDelete(p._id)}
+                    >
+                      Delete
+                    </Button>
                   </div>
+
 
                   <div className="text-[11px] text-gray-400">
                     For invoice: open{" "}

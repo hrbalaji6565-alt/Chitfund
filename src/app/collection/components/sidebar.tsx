@@ -6,6 +6,7 @@ import {
   Wallet,
   FileText,
   LogOut,
+  Banknote,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -25,7 +26,7 @@ const Sidebar: React.FC = () => {
 
   const links = [
     { href: "/collection", label: "Collection Dashboard", icon: <LayoutDashboard size={16} /> },
-    { href: "/collection/Collection", label: "Collection", icon: <FileText size={16} /> },
+    { href: "/collection/transactions", label: "Transaction", icon: <Banknote size={16} /> },
     { href: "/collection/loan", label: "Loan Collection", icon: <Wallet size={16} /> },
   ];
   const router = useRouter();

@@ -475,7 +475,7 @@ export default function LoanCollectionPage() {
 
           {!loading && visibleRows.length > 0 && (
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
+              <table className="-full min-w-[1000px] text-sm">
                 <thead>
                   <tr className="border-b bg-gray-50">
                     <th className="text-left p-3 font-medium">Member</th>
