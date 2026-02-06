@@ -74,6 +74,12 @@ const safeNum = (v: unknown): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
+const toNumber = (v: unknown): number => {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
 const fmt = (n: number): string => n.toLocaleString("en-IN");
 
 /** months since startDate (1-based) */
@@ -164,6 +170,132 @@ const computeMetaFromGroup = (
     totalMembers,
     monthlyCollected,
   };
+};
+
+const parseAllocationArray = (input: unknown): AllocationDetail[] | undefined => {
+  if (!Array.isArray(input)) return undefined;
+  const out: AllocationDetail[] = [];
+
+  for (const item of input) {
+    if (!isRecord(item)) continue;
+    const rawMonth = item.monthIndex ?? item.idx ?? item.month ?? item.mindex;
+    let monthIndex =
+      typeof rawMonth === "number" ? rawMonth : toNumber(rawMonth);
+    if (monthIndex >= 0 && monthIndex < 1) monthIndex += 1;
+
+    const principalPaid = toNumber(
+      item.principalPaid ?? item.principal ?? item.amount ?? item.apply ?? 0,
+    );
+    const penaltyPaid = toNumber(
+      item.penaltyPaid ?? item.penalty ?? item.penaltyApplied ?? 0,
+    );
+
+    out.push({
+      monthIndex: Math.max(1, Math.round(monthIndex)),
+      principalPaid,
+      penaltyPaid,
+    });
+  }
+
+  return out.length ? out : undefined;
+};
+
+const shouldShiftAllocated = (
+  raw: unknown,
+  totalMonths?: number,
+): boolean => {
+  if (!Array.isArray(raw)) return false;
+  let maxIdx = -1;
+  let minIdx = Number.POSITIVE_INFINITY;
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    const m = item.monthIndex;
+    if (typeof m === "number" && m === 0) return true;
+    if (typeof m === "string" && Number(m) === 0) return true;
+    const n = typeof m === "number" ? m : Number(m);
+    if (Number.isFinite(n)) {
+      maxIdx = Math.max(maxIdx, n);
+      minIdx = Math.min(minIdx, n);
+    }
+  }
+  if (minIdx !== Number.POSITIVE_INFINITY && minIdx >= 1) {
+    // Looks 1-based (even if M1 missing), so don't shift.
+    return false;
+  }
+  if (typeof totalMonths === "number" && totalMonths > 0) {
+    // Ledger allocations are 0-based; if max fits 0..totalMonths-1, assume 0-based.
+    if (maxIdx >= 0 && maxIdx <= totalMonths - 1) return true;
+    if (maxIdx === totalMonths) return false;
+  }
+  // Default: assume 1-based to avoid shifting into next month.
+  return false;
+};
+
+const normalizeAllocationMonths = (
+  arr: AllocationDetail[],
+  shiftOneBased: boolean,
+): AllocationDetail[] => {
+  if (!shiftOneBased) return arr;
+  return arr.map((a) => ({
+    ...a,
+    monthIndex: Math.max(1, Math.round((a.monthIndex ?? 0) + 1)),
+  }));
+};
+
+const parseAllocationsFromPayment = (
+  raw: UnknownRecord,
+  totalMonths?: number,
+): AllocationDetail[] | undefined => {
+  const shiftAllocatedTop = shouldShiftAllocated(raw.allocated, totalMonths);
+  const shiftAllocatedRawMeta = isRecord(raw.rawMeta)
+    ? shouldShiftAllocated(raw.rawMeta.allocated, totalMonths)
+    : false;
+
+  const candidates: Array<{ value: unknown; shiftOneBased: boolean }> = [
+    { value: raw.allocationDetails, shiftOneBased: false },
+    { value: raw.allocationSummary, shiftOneBased: false },
+    { value: raw.allocation, shiftOneBased: false },
+  ];
+
+  if (isRecord(raw.rawMeta)) {
+    const rm = raw.rawMeta;
+    candidates.push(
+      { value: rm.allocationDetails, shiftOneBased: false },
+      { value: rm.allocationSummary, shiftOneBased: false },
+      { value: rm.allocation, shiftOneBased: false },
+      { value: rm.appliedAllocation, shiftOneBased: false },
+      {
+        value: rm.allocated,
+        shiftOneBased: shiftAllocatedRawMeta,
+      },
+    );
+  }
+
+  candidates.push({
+    value: raw.allocated,
+    shiftOneBased: shiftAllocatedTop,
+  });
+
+  for (const c of candidates) {
+    if (typeof c.value === "string") {
+      try {
+        const parsed = JSON.parse(c.value) as unknown;
+        const arr = parseAllocationArray(parsed);
+        if (arr && arr.length) {
+          return normalizeAllocationMonths(arr, c.shiftOneBased);
+        }
+      } catch {
+        // ignore
+      }
+    } else {
+      const arr = parseAllocationArray(c.value);
+      if (arr && arr.length) {
+        return normalizeAllocationMonths(arr, c.shiftOneBased);
+      }
+    }
+  }
+
+  return undefined;
 };
 
 function AdminChitsPage() {
@@ -490,21 +622,16 @@ function AdminChitsPage() {
               ? pr.utr
               : undefined;
 
+        const allocationDetails = parseAllocationsFromPayment(
+          pr,
+          safeNum(group?.totalMonths ?? 0),
+        );
+
         const allocation = isRecord(pr.allocation)
           ? { monthIndex: safeNum(pr.allocation.monthIndex) || undefined }
-          : undefined;
-
-        const allocationDetails: AllocationDetail[] | undefined = Array.isArray(
-          pr.allocationDetails,
-        )
-          ? (pr.allocationDetails as unknown[])
-            .filter(isRecord)
-            .map((ad) => ({
-              monthIndex: safeNum(ad.monthIndex),
-              principalPaid: safeNum(ad.principalPaid),
-              penaltyPaid: safeNum(ad.penaltyPaid),
-            }))
-          : undefined;
+          : allocationDetails && allocationDetails.length
+            ? { monthIndex: safeNum(allocationDetails[0]?.monthIndex) || undefined }
+            : undefined;
 
         const isApproved =
           pr.status === "approved" ||
@@ -514,7 +641,9 @@ function AdminChitsPage() {
         const allocMonth =
           typeof allocation?.monthIndex === "number"
             ? allocation.monthIndex
-            : undefined;
+            : allocationDetails && allocationDetails.length
+              ? allocationDetails[0]?.monthIndex
+              : undefined;
 
         const row: PaymentRow = {
           id,
