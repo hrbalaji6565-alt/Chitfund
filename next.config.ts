@@ -14,11 +14,6 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-
-  // ignore ESLint during build
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
 };
 
 export default withPwa(nextConfig);

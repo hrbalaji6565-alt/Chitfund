@@ -126,8 +126,6 @@ export default function SubscribersPage() {
   const dispatch = useDispatch<AppDispatch>();
   const members = useSelector((s: RootState) => s.members.members) as Member[]; // server members
   const memberStatus = useSelector((s: RootState) => s.members.status);
-  // keep memberError referenced to avoid unused-var lint (you can display it if desired)
-  const memberError = useSelector((s: RootState) => s.members.error) as unknown;
 
   const groups = useSelector((s: RootState) => s.chitGroups.groups) as { _id: string; name: string }[];
   const groupsStatus = useSelector((s: RootState) => s.chitGroups.status);
@@ -175,6 +173,7 @@ export default function SubscribersPage() {
     status: "paid" | "pending";
   }>>([]);
   const [emiLoading, setEmiLoading] = useState(false);
+  const [emiError, setEmiError] = useState<string | null>(null);
 
   // fetch members & groups on mount
   useEffect(() => {
@@ -379,6 +378,8 @@ export default function SubscribersPage() {
   const handleView = async (s: SubscriberLocal) => {
     setViewingSubscriber(s);
     setViewOpen(true);
+    setEmiSchedule([]);
+    setEmiError(null);
     
     // Fetch EMI schedule for this member
     if (s._id) {
@@ -388,16 +389,22 @@ export default function SubscribersPage() {
           credentials: "include",
         });
         const data = await res.json();
-        if (data.success) {
+        if (res.ok && data.success) {
           setEmiSchedule(data.emiSchedule || []);
+        } else {
+          setEmiError(data.message || "Failed to load loan EMI schedule.");
+          setEmiSchedule([]);
         }
       } catch (err) {
         console.error("Error fetching EMI schedule:", err);
+        setEmiError("Failed to load loan EMI schedule.");
+        setEmiSchedule([]);
       } finally {
         setEmiLoading(false);
       }
     } else {
       setEmiSchedule([]);
+      setEmiError(null);
     }
   };
 
@@ -768,20 +775,50 @@ export default function SubscribersPage() {
                 <div className="bg-[var(--bg-muted)] rounded-xl p-4 border border-[var(--border-color)]">
                   <h4 className="text-sm font-semibold mb-3">Notes & Metadata</h4>
                   <div className="text-sm text-[var(--text-secondary)] space-y-2">
-                    <div className="flex justify-between"><strong>Member ID:</strong> <span className="truncate max-w-[60%] text-right">{viewingSubscriber._id ?? "—"}</span></div>
-                    <div className="flex justify-between"><strong>Total Paid:</strong> <span>₹{Number(viewingSubscriber.totalPaid ?? 0).toLocaleString()}</span></div>
-                    <div className="flex justify-between"><strong>Pending:</strong> <span>₹{Number(viewingSubscriber.pendingAmount ?? 0).toLocaleString()}</span></div>
+                    <div className="flex justify-between"><strong>Member ID:</strong> <span className="truncate max-w-[60%] text-right">{viewingSubscriber._id ?? "-"}</span></div>
+                    <div className="flex justify-between"><strong>Total Paid:</strong> <span>Rs. {Number(viewingSubscriber.totalPaid ?? 0).toLocaleString("en-IN")}</span></div>
+                    <div className="flex justify-between"><strong>Pending:</strong> <span>Rs. {Number(viewingSubscriber.pendingAmount ?? 0).toLocaleString("en-IN")}</span></div>
                   </div>
                 </div>
 
                 {/* EMI Schedule Section */}
                 <div className="bg-[var(--bg-muted)] rounded-xl p-4 border border-[var(--border-color)]">
-                  <h4 className="text-sm font-semibold mb-3">Loan EMI Schedule</h4>
+                  <div className="mb-3">
+                    <h4 className="text-sm font-semibold">Loan EMI Schedule</h4>
+                    <p className="text-xs text-[var(--text-secondary)] mt-1">
+                      Combined loan schedule for this member. Penalty and total due are shown month-wise.
+                    </p>
+                  </div>
+                  {!emiLoading && !emiError && emiSchedule.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                      <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-3">
+                        <p className="text-xs text-[var(--text-secondary)]">Total EMI Rows</p>
+                        <p className="text-lg font-semibold text-[var(--text-primary)]">{emiSchedule.length}</p>
+                      </div>
+                      <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-3">
+                        <p className="text-xs text-[var(--text-secondary)]">Pending Rows</p>
+                        <p className="text-lg font-semibold text-amber-600">
+                          {emiSchedule.filter((e) => e.status !== "paid").length}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-3">
+                        <p className="text-xs text-[var(--text-secondary)]">Outstanding</p>
+                        <p className="text-lg font-semibold text-red-600">
+                          Rs. {emiSchedule
+                            .reduce((sum, e) => sum + Math.max(0, e.totalDue - e.paidAmount), 0)
+                            .toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {emiError && (
+                    <div className="text-sm text-red-600 py-2">{emiError}</div>
+                  )}
                   {emiLoading ? (
                     <div className="text-sm text-[var(--text-secondary)] py-4">Loading EMI schedule...</div>
-                  ) : emiSchedule.length === 0 ? (
+                  ) : emiSchedule.length === 0 && !emiError ? (
                     <div className="text-sm text-[var(--text-secondary)] py-4">No loan EMI records found.</div>
-                  ) : (
+                  ) : emiError ? null : (
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm border-collapse">
                         <thead>
@@ -807,20 +844,20 @@ export default function SubscribersPage() {
                                 })}
                               </td>
                               <td className="py-2 px-2 text-right text-[var(--text-secondary)]">
-                                ₹{emi.emiAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                                Rs. {emi.emiAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                               </td>
                               <td className="py-2 px-2 text-right text-[var(--text-secondary)]">
                                 {emi.penalty > 0 ? (
-                                  <span className="text-orange-600">₹{emi.penalty.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                                  <span className="text-orange-600">Rs. {emi.penalty.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
                                 ) : (
-                                  <span>₹0.00</span>
+                                  <span>Rs. 0.00</span>
                                 )}
                               </td>
                               <td className="py-2 px-2 text-right font-medium text-[var(--text-primary)]">
-                                ₹{emi.totalDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                                Rs. {emi.totalDue.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                               </td>
                               <td className="py-2 px-2 text-right text-[var(--text-secondary)]">
-                                ₹{emi.paidAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                                Rs. {emi.paidAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                               </td>
                               <td className="py-2 px-2">
                                 <Badge

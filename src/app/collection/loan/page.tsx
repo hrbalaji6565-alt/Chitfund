@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { motion, AnimatePresence } from "framer-motion";
-import { CheckCircle } from "lucide-react";
+import { AlertCircle, CheckCircle, Clock3, Info } from "lucide-react";
 
 import {
   Card,
@@ -72,6 +72,7 @@ const fmtCurrency = (n: number): string => `₹${n.toLocaleString("en-IN")}`;
 
 export default function LoanCollectionPage() {
   const dispatch = useDispatch<AppDispatch>();
+  const [viewMode, setViewMode] = useState<"ALL" | "CURRENT" | "COLLECTABLE">("COLLECTABLE");
 
   // Helper function to check if EMI is for current month
   const isCurrentMonthEMI = (dueDateString: string): boolean => {
@@ -274,7 +275,7 @@ export default function LoanCollectionPage() {
       
       if (row.collectNow <= 0 || row.collectNow > row.pending) {
         setErrorText(
-          `Invalid amount for ${row.memberName}. It must be > 0 and ≤ pending.`,
+          `Invalid amount for ${row.memberName}. It must be > 0 and <= pending.`,
         );
         return;
       }
@@ -299,8 +300,8 @@ export default function LoanCollectionPage() {
         success?: boolean;
         error?: string;
         message?: string;
-        transaction?: any;
-        updatedEMI?: any;
+        transaction?: unknown;
+        updatedEMI?: { status?: string };
       };
 
       if (!res.ok || !json.success) {
@@ -341,8 +342,16 @@ export default function LoanCollectionPage() {
   const displayMemberName = (r: RowWithLocal): string =>
     r.memberName ?? memberNameMap[r.memberId] ?? r.memberId;
 
-  // Filter to show ONLY current month EMIs
-  const visibleRows = rows.filter((r) => r.pending > 0 && isCurrentMonthEMI(r.dueDate));
+  const allPendingRows = rows.filter((r) => r.pending > 0);
+  const currentMonthRows = allPendingRows.filter((r) => isCurrentMonthEMI(r.dueDate));
+  const collectableRows = allPendingRows.filter((r) => isCollectionAllowed(r.dueDate));
+
+  const visibleRows =
+    viewMode === "CURRENT"
+      ? currentMonthRows
+      : viewMode === "COLLECTABLE"
+        ? collectableRows
+        : allPendingRows;
 
   const totalPendingVisible = visibleRows.reduce(
     (sum, r) => sum + r.pending,
@@ -354,8 +363,46 @@ export default function LoanCollectionPage() {
     0,
   );
 
+  const dueTodayOrEarlierCount = visibleRows.filter((r) =>
+    isCollectionAllowed(r.dueDate),
+  ).length;
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto p-4">
+      {/* Page intro */}
+      <Card className="shadow-sm border bg-gradient-to-r from-slate-50 to-sky-50">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-xl">Loan Collection Desk</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-slate-700">
+          <p>
+            This screen shows pending loan EMI entries for collection. You can
+            switch between due/current/all pending views, collect full or
+            partial amount (up to pending), choose mode, and submit each row.
+          </p>
+          <div className="grid gap-2 md:grid-cols-3">
+            <div className="rounded-md border bg-white p-3">
+              <p className="font-medium text-slate-900">1. Check details</p>
+              <p className="text-xs text-slate-600">
+                Verify member, due date, and pending amount before collecting.
+              </p>
+            </div>
+            <div className="rounded-md border bg-white p-3">
+              <p className="font-medium text-slate-900">2. Enter collect amount</p>
+              <p className="text-xs text-slate-600">
+                Amount must be greater than 0 and not more than pending.
+              </p>
+            </div>
+            <div className="rounded-md border bg-white p-3">
+              <p className="font-medium text-slate-900">3. Submit and confirm</p>
+              <p className="text-xs text-slate-600">
+                Successful collection updates row and shows receipt popup.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Collector info card */}
       <Card className="shadow-sm border">
         <CardHeader>
@@ -364,7 +411,7 @@ export default function LoanCollectionPage() {
         <CardContent>
           {collectorLoading && (
             <p className="text-sm text-gray-500">
-              Loading collector profile…
+              Loading collector profile...
             </p>
           )}
           {collectorError && (
@@ -440,19 +487,71 @@ export default function LoanCollectionPage() {
             </CardContent>
           </Card>
         </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.45, duration: 0.3 }}
+        >
+          <Card className="shadow-sm border">
+            <CardContent className="p-4">
+              <p className="text-sm text-gray-500 mb-1">Current month EMI rows</p>
+              <h3 className="text-2xl font-bold text-slate-800">{visibleRows.length}</h3>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.6, duration: 0.3 }}
+        >
+          <Card className="shadow-sm border">
+            <CardContent className="p-4">
+              <p className="text-sm text-gray-500 mb-1">Collectable today</p>
+              <h3 className="text-2xl font-bold text-emerald-700">
+                {dueTodayOrEarlierCount}
+              </h3>
+            </CardContent>
+          </Card>
+        </motion.div>
       </div>
 
       {/* Main Collection Table */}
       <Card className="shadow-sm border">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Loan EMI Collection Management</CardTitle>
-          <Button
-            onClick={loadPendingLoanEMIs}
-            variant="outline"
-            disabled={loading}
-          >
-            Refresh
-          </Button>
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-2">
+            <CardTitle>Loan EMI Collection Management</CardTitle>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="inline-flex items-center gap-1 rounded-full border bg-sky-50 px-2 py-1 text-sky-700">
+                <Info className="h-3.5 w-3.5" />
+                View filter controls which EMIs are shown
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full border bg-amber-50 px-2 py-1 text-amber-700">
+                <Clock3 className="h-3.5 w-3.5" />
+                Collection allowed on or after due date
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={viewMode} onValueChange={(v: "ALL" | "CURRENT" | "COLLECTABLE") => setViewMode(v)}>
+              <SelectTrigger className="w-[210px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="COLLECTABLE">Show collectable (due) EMIs</SelectItem>
+                <SelectItem value="CURRENT">Show current month only</SelectItem>
+                <SelectItem value="ALL">Show all pending EMIs</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              onClick={loadPendingLoanEMIs}
+              variant="outline"
+              disabled={loading}
+            >
+              Refresh
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {loading && (
@@ -469,13 +568,17 @@ export default function LoanCollectionPage() {
 
           {!loading && visibleRows.length === 0 && (
             <p className="text-center py-8 text-gray-500">
-              No pending loan EMIs found.
+              {viewMode === "CURRENT"
+                ? "No current month pending EMIs found."
+                : viewMode === "COLLECTABLE"
+                  ? "No due EMIs available for collection right now."
+                  : "No pending loan EMIs found."}
             </p>
           )}
 
           {!loading && visibleRows.length > 0 && (
             <div className="overflow-x-auto">
-              <table className="-full min-w-[1000px] text-sm">
+              <table className="w-full min-w-[1000px] text-sm">
                 <thead>
                   <tr className="border-b bg-gray-50">
                     <th className="text-left p-3 font-medium">Member</th>
@@ -495,7 +598,8 @@ export default function LoanCollectionPage() {
                       <td className="p-3">
                         <div>
                           <p className="font-medium">{displayMemberName(row)}</p>
-                          <p className="text-xs text-gray-500">
+                          <p className="text-xs text-gray-500 flex items-center gap-1">
+                            <Clock3 className="h-3.5 w-3.5" />
                             Due: {formatDate(row.dueDate)}
                           </p>
                         </div>
@@ -535,6 +639,7 @@ export default function LoanCollectionPage() {
                           className="w-24 text-center"
                           min="0"
                           max={row.pending}
+                          step="0.01"
                         />
                       </td>
                       <td className="p-3">
@@ -559,18 +664,26 @@ export default function LoanCollectionPage() {
                         </Select>
                       </td>
                       <td className="p-3 text-center">
-                        <Button
-                          onClick={() => handleCollect(row)}
-                          disabled={
-                            !isCollectionAllowed(row.dueDate) ||
-                            row.collectNow <= 0 || 
-                            row.collectNow > row.pending
-                          }
-                          size="sm"
-                          className="bg-red-600 hover:bg-red-700 text-white"
-                        >
-                          Collect
-                        </Button>
+                        <div className="space-y-2">
+                          <Button
+                            onClick={() => handleCollect(row)}
+                            disabled={
+                              !isCollectionAllowed(row.dueDate) ||
+                              row.collectNow <= 0 ||
+                              row.collectNow > row.pending
+                            }
+                            size="sm"
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                          >
+                            Collect EMI
+                          </Button>
+                          {!isCollectionAllowed(row.dueDate) && (
+                            <p className="text-[11px] text-amber-700 inline-flex items-center gap-1">
+                              <AlertCircle className="h-3 w-3" />
+                              Due date not reached
+                            </p>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

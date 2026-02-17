@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { Card, CardContent } from "@/app/components/ui/card";
 import Button from "@/app/components/ui/button";
@@ -49,6 +49,8 @@ type CollectionUser = {
   email?: string;
   phone?: string;
 };
+
+const PAGE_SIZE = 25;
 
 const isRecord = (v: unknown): v is UnknownRecord =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -381,11 +383,16 @@ export default function AdminTransactionsPage(): React.ReactElement {
 
   const [payments, setPayments] = useState<PendingPayment[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [filter, setFilter] = useState("");
+  const [debouncedFilter, setDebouncedFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>(
     {},
   );
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   // collection users list (for "Collected By" name)
   const [collectionUsers, setCollectionUsers] = useState<CollectionUser[]>([]);
@@ -488,140 +495,104 @@ export default function AdminTransactionsPage(): React.ReactElement {
     return map;
   }, [collectionUsers]);
 
-  async function load() {
-    setLoading(true);
-    setError(null);
-    setPayments([]);
-    try {
-      log("Trying /api/admin/transactions");
-      const adminResp = await fetchJson(
-        "/api/admin/transactions?status=all",
-      );
+  const loadPage = useCallback(
+    async (nextPage: number, reset = false) => {
+      if (reset) {
+        setLoading(true);
+      } else {
+        setLoadingMore(true);
+      }
+      setError(null);
 
-      if (adminResp.ok) {
+      try {
+        const params = new URLSearchParams({
+          status: "all",
+          page: String(nextPage),
+          limit: String(PAGE_SIZE),
+        });
+        if (debouncedFilter.trim()) {
+          params.set("q", debouncedFilter.trim());
+        }
+
+        const adminResp = await fetchJson(`/api/admin/transactions?${params.toString()}`);
+        if (!adminResp.ok) {
+          throw new Error(`Failed to load transactions (${adminResp.status})`);
+        }
+
         let listUnknown: unknown[] = [];
-        if (
-          isRecord(adminResp.body) &&
-          Array.isArray(adminResp.body.payments)
-        ) {
+        if (isRecord(adminResp.body) && Array.isArray(adminResp.body.payments)) {
           listUnknown = adminResp.body.payments as unknown[];
         } else if (Array.isArray(adminResp.body)) {
           listUnknown = adminResp.body as unknown[];
         }
 
-        if (listUnknown.length > 0) {
-          setPayments(
-            listUnknown.map((r) =>
-              normalizePayment(
-                r,
-                undefined,
-                undefined,
-                "/api/admin/transactions",
-              ),
-            ),
-          );
-          setLoading(false);
-          return;
-        }
-        log("/api/admin/transactions returned empty list");
-      } else {
-        log(
-          `/api/admin/transactions returned ${adminResp.status}`,
-        );
-      }
-
-      // Fallback: chitgroups + per-group payments
-      log("Fetching /api/chitgroups for fallback");
-      const gResp = await fetchJson("/api/chitgroups");
-      if (!gResp.ok) {
-        log(`/api/chitgroups returned ${gResp.status}`);
-        setError(
-          "No pending transactions and fallback failed. Ensure admin session is active.",
-        );
-        setLoading(false);
-        return;
-      }
-
-      const bodyGroups = gResp.body;
-      let groupsArr: unknown[] = [];
-      if (
-        isRecord(bodyGroups) &&
-        Array.isArray(bodyGroups.groups)
-      ) {
-        groupsArr = bodyGroups.groups as unknown[];
-      } else if (Array.isArray(bodyGroups)) {
-        groupsArr = bodyGroups as unknown[];
-      }
-
-      const concurrency = 6;
-      const pending: PendingPayment[] = [];
-
-      async function fetchGroupPayments(g: UnknownRecord) {
-        const gid = asOptString(g._id ?? g.id) ?? "";
-        if (!gid) return;
-        const pUrl = `/api/chitgroups/${encodeURIComponent(
-          gid,
-        )}/payments?all=true`;
-        log(`Fetching ${pUrl}`);
-        const pRes = await fetchJson(pUrl);
-        if (!pRes.ok) {
-          log(` -> ${pUrl} returned ${pRes.status}`);
-          return;
-        }
-
-        const bodyPayments = pRes.body;
-        let arr: unknown[] = [];
-        if (Array.isArray(bodyPayments)) {
-          arr = bodyPayments as unknown[];
-        } else if (
-          isRecord(bodyPayments) &&
-          Array.isArray(bodyPayments.payments)
-        ) {
-          arr = bodyPayments.payments as unknown[];
-        }
-
-        const fallbackName = asOptString(
-          g.name ?? g.groupName,
-        );
-        for (const item of arr) {
-          pending.push(
-            normalizePayment(
-              item,
-              gid,
-              fallbackName || undefined,
-              "fallback",
-            ),
-          );
-        }
-      }
-
-      for (let i = 0; i < groupsArr.length; i += concurrency) {
-        const slice = groupsArr.slice(i, i + concurrency);
-        await Promise.all(
-          slice.map((gg) =>
-            isRecord(gg)
-              ? fetchGroupPayments(gg)
-              : Promise.resolve(),
+        const incoming = listUnknown.map((r) =>
+          normalizePayment(
+            r,
+            undefined,
+            undefined,
+            "/api/admin/transactions",
           ),
         );
-      }
 
-      log(`Fallback found ${pending.length} payments across groups`);
-      setPayments(pending);
-    } catch (err) {
-      console.error(err);
-      setError(
-        err instanceof Error ? err.message : String(err),
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
+        setPayments((prev) => {
+          if (reset) return incoming;
+          const ids = new Set(prev.map((p) => p._id));
+          const merged = [...prev];
+          for (const item of incoming) {
+            if (!ids.has(item._id)) merged.push(item);
+          }
+          return merged;
+        });
+
+        let nextHasMore = incoming.length === PAGE_SIZE;
+        const body = adminResp.body;
+        if (isRecord(body) && isRecord(body.pagination)) {
+          const hasMoreValue = body.pagination.hasMore;
+          if (typeof hasMoreValue === "boolean") {
+            nextHasMore = hasMoreValue;
+          }
+        }
+
+        setPage(nextPage);
+        setHasMore(nextHasMore);
+      } catch (err) {
+        console.error(err);
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [debouncedFilter],
+  );
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const t = setTimeout(() => {
+      setDebouncedFilter(filter.trim());
+    }, 350);
+    return () => clearTimeout(t);
+  }, [filter]);
+
+  useEffect(() => {
+    void loadPage(1, true);
+  }, [debouncedFilter, loadPage]);
+
+  useEffect(() => {
+    const target = loadMoreRef.current;
+    if (!target || loading || loadingMore || !hasMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        void loadPage(page + 1);
+      },
+      { rootMargin: "200px" },
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMore, loadPage, loading, loadingMore, page]);
 
   async function handleAction(paymentId: string, approve: boolean) {
     setError(null);
@@ -726,25 +697,6 @@ export default function AdminTransactionsPage(): React.ReactElement {
 
   const getDisplayGroupName = (p: PendingPayment): string =>
     p.groupName ?? p.groupId ?? "Group";
-
-  const search = filter.toLowerCase().trim();
-  const filtered = useMemo(
-    () =>
-      payments.filter((p) => {
-        if (!search) return true;
-        const displayName = getDisplayMemberName(p).toLowerCase();
-        const groupName = getDisplayGroupName(p).toLowerCase();
-        const utr = String(p.utr ?? "").toLowerCase();
-        const idstr = String(p._id ?? "").toLowerCase();
-        return (
-          displayName.includes(search) ||
-          groupName.includes(search) ||
-          utr.includes(search) ||
-          idstr.includes(search)
-        );
-      }),
-    [payments, search, memberNameMap],
-  );
   async function handleDelete(paymentId: string) {
     const confirmDelete = window.confirm(
       "Are you sure you want to delete this transaction? This action cannot be undone.",
@@ -765,8 +717,8 @@ export default function AdminTransactionsPage(): React.ReactElement {
       const j: unknown = await res.json().catch(() => ({}));
       if (!res.ok) {
         let msg = res.statusText;
-        if (typeof j === "object" && j && "error" in j) {
-          msg = String((j as any).error);
+        if (isRecord(j) && j.error !== undefined) {
+          msg = String(j.error);
         }
         throw new Error(msg);
       }
@@ -796,8 +748,8 @@ export default function AdminTransactionsPage(): React.ReactElement {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
-          <Button onClick={load} className="ml-auto" disabled={loading}>
-            {loading ? "Refreshing…" : "Refresh"}
+          <Button onClick={() => void loadPage(1, true)} className="ml-auto" disabled={loading}>
+            {loading ? "Refreshing..." : "Refresh"}
           </Button>
         </div>
       </div>
@@ -805,16 +757,15 @@ export default function AdminTransactionsPage(): React.ReactElement {
       {error && <div className="text-red-600 mb-4">{error}</div>}
       {loading && (
         <div className="text-sm text-gray-500 mb-4">
-          Loading pending transactions…
-        </div>
+          Loading pending transactions...</div>
       )}
 
       <div className="space-y-3">
-        {filtered.length === 0 && !loading && (
+        {payments.length === 0 && !loading && (
           <div className="text-sm text-gray-500">No payments.</div>
         )}
 
-        {filtered.map((p) => {
+        {payments.map((p) => {
           const itemLoading = Boolean(actionLoading[p._id]);
           const displayName = getDisplayMemberName(p);
           const displayGroup = getDisplayGroupName(p);
@@ -1032,7 +983,16 @@ export default function AdminTransactionsPage(): React.ReactElement {
             </Card>
           );
         })}
+
+        {loadingMore && (
+          <div className="text-sm text-gray-500 py-2 text-center">
+            Loading more...
+          </div>
+        )}
+
+        <div ref={loadMoreRef} className="h-1" />
       </div>
     </div>
   );
 }
+
