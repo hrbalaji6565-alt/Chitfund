@@ -6,6 +6,11 @@ import ChitGroup from "@/app/models/ChitGroup";
 import { uploadBase64Image, destroyByPublicId } from "@/app/lib/cloudinary";
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
+import {
+  normalizeGroupMemberSlots,
+  slotsToStoredMembers,
+  createSlotId,
+} from "@/app/lib/groupSlots";
 
 /** Resolve context.params at runtime (handles Promise params in Next's types). */
 async function resolveParams(context: unknown): Promise<{ id: string }> {
@@ -124,17 +129,25 @@ export async function PUT(req: NextRequest, context: unknown) {
 
       const ensureMemberInGroup = async (groupIdStr: string) => {
         if (!isValidObjectId(groupIdStr)) return;
-        const g = await ChitGroup.findById(groupIdStr);
+        const g = await ChitGroup.findById(groupIdStr).lean();
         if (!g) throw new Error(`Group ${groupIdStr} not found`);
-        const membersArr = Array.isArray(g.members) ? g.members.map(String) : [];
-        if (!membersArr.includes(String(memberDoc._id))) {
-          await ChitGroup.findByIdAndUpdate(groupIdStr, { $addToSet: { members: memberDoc._id } });
+        const slots = normalizeGroupMemberSlots((g as Record<string, unknown>).members);
+        if (!slots.some((s) => s.memberId === String(memberDoc._id))) {
+          slots.push({
+            memberId: String(memberDoc._id),
+            slotId: createSlotId(String(memberDoc._id), slots.length + 1),
+          });
+          await ChitGroup.findByIdAndUpdate(groupIdStr, { members: slotsToStoredMembers(slots) });
         }
       };
 
       const removeMemberFromGroupById = async (groupIdStr: string) => {
         if (!isValidObjectId(groupIdStr)) return;
-        await ChitGroup.findByIdAndUpdate(groupIdStr, { $pull: { members: memberDoc._id } }).catch(() => {});
+        const g = await ChitGroup.findById(groupIdStr).lean().catch(() => null);
+        if (!g) return;
+        const slots = normalizeGroupMemberSlots((g as Record<string, unknown>).members);
+        const filtered = slots.filter((s) => s.memberId !== String(memberDoc._id));
+        await ChitGroup.findByIdAndUpdate(groupIdStr, { members: slotsToStoredMembers(filtered) }).catch(() => {});
       };
 
       if (Array.isArray(body.group)) {
@@ -219,9 +232,23 @@ export async function DELETE(_req: NextRequest, context: unknown) {
 
     const groupsField = member.get("groups");
     if (Array.isArray(groupsField) && groupsField.length) {
-      await Promise.all(groupsField.map((gId) => ChitGroup.findByIdAndUpdate(String(gId), { $pull: { members: member._id } }).catch(() => {})));
+      await Promise.all(
+        groupsField.map(async (gId) => {
+          const g = await ChitGroup.findById(String(gId)).lean().catch(() => null);
+          if (!g) return;
+          const slots = normalizeGroupMemberSlots((g as Record<string, unknown>).members);
+          const filtered = slots.filter((s) => s.memberId !== String(member._id));
+          await ChitGroup.findByIdAndUpdate(String(gId), { members: slotsToStoredMembers(filtered) }).catch(() => {});
+        }),
+      );
     } else if (member.get("group")) {
-      await ChitGroup.findByIdAndUpdate(String(member.get("group")), { $pull: { members: member._id } }).catch(() => {});
+      const gid = String(member.get("group"));
+      const g = await ChitGroup.findById(gid).lean().catch(() => null);
+      if (g) {
+        const slots = normalizeGroupMemberSlots((g as Record<string, unknown>).members);
+        const filtered = slots.filter((s) => s.memberId !== String(member._id));
+        await ChitGroup.findByIdAndUpdate(gid, { members: slotsToStoredMembers(filtered) }).catch(() => {});
+      }
     }
 
     if (typeof member.aadhaarPublicId === "string") await destroyByPublicId(member.aadhaarPublicId).catch(() => {});

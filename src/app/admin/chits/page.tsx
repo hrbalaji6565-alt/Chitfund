@@ -26,6 +26,8 @@ type AllocationDetail = {
 type PaymentRow = {
   id: string;
   memberId?: string;
+  memberSlotId?: string;
+  memberKey?: string;
   memberName?: string;
   amount: number;
   date?: string;
@@ -61,6 +63,13 @@ type PaymentsMeta = {
   currentMonthIndex: number;
   totalMembers: number;
   monthlyCollected: number;
+};
+
+type GroupSlot = {
+  memberId: string;
+  slotId: string;
+  slotIndex: number;
+  name?: string;
 };
 
 const isRecord = (v: unknown): v is UnknownRecord =>
@@ -170,6 +179,37 @@ const computeMetaFromGroup = (
     totalMembers,
     monthlyCollected,
   };
+};
+
+const normalizeGroupSlots = (group?: ChitGroup): GroupSlot[] => {
+  if (!group || !Array.isArray(group.members)) return [];
+  const out: GroupSlot[] = [];
+  for (let i = 0; i < group.members.length; i += 1) {
+    const raw = group.members[i];
+    if (typeof raw === "string" || typeof raw === "number") {
+      const memberId = String(raw);
+      out.push({
+        memberId,
+        slotId: `${memberId}:legacy:${i + 1}`,
+        slotIndex: i + 1,
+      });
+      continue;
+    }
+    if (isRecord(raw)) {
+      const memberId = String(raw.memberId ?? raw._id ?? raw.id ?? "");
+      if (!memberId) continue;
+      const slotId = String(
+        raw.slotId ?? raw.memberSlotId ?? `${memberId}:legacy:${i + 1}`,
+      );
+      out.push({
+        memberId,
+        slotId,
+        slotIndex: i + 1,
+        name: typeof raw.name === "string" ? raw.name : undefined,
+      });
+    }
+  }
+  return out;
 };
 
 const parseAllocationArray = (input: unknown): AllocationDetail[] | undefined => {
@@ -467,6 +507,7 @@ function AdminChitsPage() {
     const group = (groups ?? []).find(
       (g) => String(g._id ?? g.id) === groupId,
     ) as ChitGroup | undefined;
+    const groupSlots = normalizeGroupSlots(group);
 
     const fetchWithFallback = async (
       url: string,
@@ -515,18 +556,17 @@ function AdminChitsPage() {
       const aJson: unknown = await aRes.json().catch(() => ({}));
 
       const nameMap: Record<string, string | undefined> = { ...memberNamesMap };
-      if (Array.isArray(group?.members)) {
-        for (const m of group.members as unknown[]) {
-          let id = "UNKNOWN";
-          let n: string | undefined;
-          if (typeof m === "string") {
-            id = m;
-          } else if (isRecord(m)) {
-            id = String(m._id ?? m.id ?? "UNKNOWN");
-            n = typeof m.name === "string" ? m.name : undefined;
-          }
-          if (!nameMap[id]) nameMap[id] = n ?? id;
-        }
+      const slotsByMember = new Map<string, GroupSlot[]>();
+      const slotById = new Map<string, GroupSlot>();
+      for (const s of groupSlots) {
+        if (!slotsByMember.has(s.memberId)) slotsByMember.set(s.memberId, []);
+        slotsByMember.get(s.memberId)!.push(s);
+        slotById.set(s.slotId, s);
+      }
+      for (const s of groupSlots) {
+        const baseName = nameMap[s.memberId] ?? s.name ?? s.memberId;
+        nameMap[s.memberId] = baseName;
+        nameMap[s.slotId] = `${baseName} (Slot ${s.slotIndex})`;
       }
 
       const paymentsArr = extractArray(pJson);
@@ -538,11 +578,11 @@ function AdminChitsPage() {
       const matrix = new Map<string, Map<number, number>>();
       const pending: PaymentRow[] = [];
 
-      const addRow = (mid: string, row: PaymentRow) => {
-        if (!byMember.has(mid)) {
-          byMember.set(mid, { paid: 0, rows: [] });
+      const addRow = (memberKey: string, row: PaymentRow) => {
+        if (!byMember.has(memberKey)) {
+          byMember.set(memberKey, { paid: 0, rows: [] });
         }
-        const rec = byMember.get(mid)!;
+        const rec = byMember.get(memberKey)!;
         rec.rows.push(row);
         rec.paid += row.amount;
       };
@@ -599,6 +639,15 @@ function AdminChitsPage() {
         })();
 
         const memberId = normalizeMemberId(memberIdRaw);
+        const memberSlotId = toStr(pr.memberSlotId ?? pr.slotId);
+        const fallbackSlots = slotsByMember.get(memberId) ?? [];
+        const derivedKey =
+          memberSlotId && slotById.has(memberSlotId)
+            ? memberSlotId
+            : fallbackSlots.length === 1
+              ? fallbackSlots[0].slotId
+              : memberId;
+        const memberKey = derivedKey;
         let memberName: string | undefined = nameMap[memberId];
 
         if (
@@ -607,6 +656,9 @@ function AdminChitsPage() {
           typeof pr.member.name === "string"
         ) {
           memberName = pr.member.name;
+        }
+        if (!nameMap[memberKey]) {
+          nameMap[memberKey] = memberName ?? nameMap[memberId] ?? memberId;
         }
 
         const type =
@@ -648,6 +700,8 @@ function AdminChitsPage() {
         const row: PaymentRow = {
           id,
           memberId,
+          memberSlotId,
+          memberKey,
           memberName,
           amount,
           date,
@@ -658,14 +712,14 @@ function AdminChitsPage() {
           source: "payment",
         };
 
-        addRow(memberId, row);
+        addRow(memberKey, row);
 
         if (isApproved) {
           if (allocationDetails && allocationDetails.length) {
             for (const ad of allocationDetails) {
               const usedMonth = ad.monthIndex > 0 ? ad.monthIndex : 1;
-              if (!matrix.has(memberId)) matrix.set(memberId, new Map());
-              const mm = matrix.get(memberId)!;
+              if (!matrix.has(memberKey)) matrix.set(memberKey, new Map());
+              const mm = matrix.get(memberKey)!;
               mm.set(
                 usedMonth,
                 (mm.get(usedMonth) ?? 0) + ad.principalPaid,
@@ -676,8 +730,8 @@ function AdminChitsPage() {
               typeof allocMonth === "number" && allocMonth > 0
                 ? allocMonth
                 : currentMonthIndex;
-            if (!matrix.has(memberId)) matrix.set(memberId, new Map());
-            const mm = matrix.get(memberId)!;
+            if (!matrix.has(memberKey)) matrix.set(memberKey, new Map());
+            const mm = matrix.get(memberKey)!;
             mm.set(usedMonth, (mm.get(usedMonth) ?? 0) + amount);
           }
         } else {
@@ -685,18 +739,8 @@ function AdminChitsPage() {
         }
       }
 
-      if (Array.isArray(group?.members)) {
-        for (const m of group.members as unknown[]) {
-          let mid = "UNKNOWN";
-          if (typeof m === "string") mid = m;
-          else if (isRecord(m)) {
-            mid = String(m._id ?? m.id ?? "UNKNOWN");
-            if (!nameMap[mid]) {
-              nameMap[mid] = typeof m.name === "string" ? m.name : mid;
-            }
-          }
-          if (!matrix.has(mid)) matrix.set(mid, new Map());
-        }
+      for (const s of groupSlots) {
+        if (!matrix.has(s.slotId)) matrix.set(s.slotId, new Map());
       }
 
       const modalRows: PaymentRow[] = [];
@@ -1396,25 +1440,11 @@ function AdminChitsPage() {
                   <tbody>
                     {(() => {
                       const groupObj = getGroupById(openGroupId);
-                      const memberIdsSet = new Set<string>();
-
+                      const slotList = normalizeGroupSlots(groupObj);
+                      const membersList = slotList.map((s) => s.slotId);
                       for (const k of paymentsMatrix.keys()) {
-                        memberIdsSet.add(k);
+                        if (!membersList.includes(k)) membersList.push(k);
                       }
-
-                      if (groupObj && Array.isArray(groupObj.members)) {
-                        for (const m of groupObj.members as unknown[]) {
-                          if (typeof m === "string") {
-                            memberIdsSet.add(m);
-                          } else if (isRecord(m)) {
-                            memberIdsSet.add(
-                              String(m._id ?? m.id ?? "UNKNOWN"),
-                            );
-                          }
-                        }
-                      }
-
-                      const membersList = Array.from(memberIdsSet);
                       if (!membersList.length) {
                         return (
                           <tr>
@@ -1425,9 +1455,9 @@ function AdminChitsPage() {
                         );
                       }
 
-                      return membersList.map((mid) => {
-                        const name = memberNamesMap[mid] ?? mid;
-                        const mm = paymentsMatrix.get(mid) ?? new Map();
+                      return membersList.map((memberKey) => {
+                        const name = memberNamesMap[memberKey] ?? memberKey;
+                        const mm = paymentsMatrix.get(memberKey) ?? new Map();
                         const paid = Number(
                           mm.get(meta.currentMonthIndex) ?? 0,
                         );
@@ -1440,7 +1470,7 @@ function AdminChitsPage() {
                               ? "Unpaid"
                               : "Partial";
                         return (
-                          <tr key={mid} className="border-t">
+                          <tr key={memberKey} className="border-t">
                             <td className="p-2">{name}</td>
                             <td className="p-2">₹{fmt(expected)}</td>
                             <td className="p-2">₹{fmt(paid)}</td>
@@ -1627,21 +1657,8 @@ function AdminChitsPage() {
                       {(() => {
                         const groupObj = getGroupById(openGroupId);
                         const memberIdsSet = new Set<string>();
-
-                        if (groupObj && Array.isArray(groupObj.members)) {
-                          for (const m of groupObj.members as unknown[]) {
-                            if (typeof m === "string") {
-                              memberIdsSet.add(m);
-                            } else if (isRecord(m)) {
-                              memberIdsSet.add(
-                                String(m._id ?? m.id ?? "UNKNOWN"),
-                              );
-                            }
-                          }
-                        }
-
-                        for (const mid of paymentsMatrix.keys()) {
-                          memberIdsSet.add(mid);
+                        for (const s of normalizeGroupSlots(groupObj)) {
+                          memberIdsSet.add(s.memberId);
                         }
 
                         return Array.from(memberIdsSet)

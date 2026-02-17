@@ -4,7 +4,7 @@ import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/app/components/ui/card";
 import { Badge } from "@/app/components/ui/badge";
-import { RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
+import { RefreshCw, ChevronLeft, ChevronRight, Eye, Trash2 } from "lucide-react";
 import Button from "@/app/components/ui/button";
 
 type Loan = {
@@ -146,6 +146,26 @@ export default function LoanListPage() {
     }
   }, []);
 
+  const handleDeleteLoan = async (loanId: string) => {
+    const ok = window.confirm("Delete this loan? This will also remove linked loan transactions.");
+    if (!ok) return;
+    try {
+      const res = await fetch(`/api/admin/loan/${encodeURIComponent(loanId)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        setError(data?.message || "Failed to delete loan");
+        return;
+      }
+      setLoans((prev) => prev.filter((l) => l._id !== loanId));
+    } catch (err) {
+      console.error("Error deleting loan:", err);
+      setError("Error deleting loan");
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-6">
@@ -211,12 +231,13 @@ export default function LoanListPage() {
                   <th className="text-left py-4 px-6 text-sm font-semibold">Loan Date</th>
                   <th className="text-left py-4 px-6 text-sm font-semibold">Next EMI Due</th>
                   <th className="text-left py-4 px-6 text-sm font-semibold">Status</th>
+                  <th className="text-left py-4 px-6 text-sm font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {paginatedLoans.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-[var(--text-secondary)]">
+                    <td colSpan={8} className="py-8 text-center text-[var(--text-secondary)]">
                       {searchTerm ? "No loans match your search." : "No loans found."}
                     </td>
                   </tr>
@@ -260,6 +281,35 @@ export default function LoanListPage() {
                         <td className="py-4 px-6 text-sm">{formatDate(loan.startDate)}</td>
                         <td className="py-4 px-6 text-sm">{formatDate(loan.nextEMIDueDate)}</td>
                         <td className="py-4 px-6">{getStatusBadge(loan)}</td>
+                        <td className="py-4 px-6">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push(`/admin/loan/profile/${loan._id}`);
+                              }}
+                            >
+                              <Eye className="w-4 h-4 mr-1" />
+                              View
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleDeleteLoan(loan._id);
+                              }}
+                              className="text-red-600 border-red-200 hover:bg-red-50"
+                            >
+                              <Trash2 className="w-4 h-4 mr-1" />
+                              Delete
+                            </Button>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })

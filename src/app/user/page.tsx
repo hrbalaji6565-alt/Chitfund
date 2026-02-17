@@ -115,8 +115,6 @@ const matchesMember = (raw: UnknownRecord, memberId: string): boolean => {
       getString(raw, "memberId") ||
       getString(raw.member, "_id", "id", "memberId");
     if (direct && direct === memberId) return true;
-
-    if (JSON.stringify(raw).includes(memberId)) return true;
   } catch {
     // ignore
   }
@@ -258,10 +256,6 @@ async function fetchTransactionsForMember(
     `/api/transactions?memberId=${encodeURIComponent(memberId)}`,
     `/api/transactions/me?memberId=${encodeURIComponent(memberId)}`,
     `/api/payments?memberId=${encodeURIComponent(memberId)}`,
-    "/api/user/transactions",
-    "/api/transactions",
-    "/api/transactions/me",
-    "/api/payments",
   ];
 
   let found: UnknownRecord[] = [];
@@ -284,7 +278,7 @@ async function fetchTransactionsForMember(
       if (!arr.length) continue;
 
       const filtered = arr.filter((p) => matchesMember(p, memberId));
-      found = filtered.length ? filtered : arr;
+      found = filtered;
       if (found.length) break;
     } catch {
       // ignore and try next

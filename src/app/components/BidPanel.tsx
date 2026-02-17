@@ -8,6 +8,7 @@ type UnknownRecord = Record<string, unknown>;
 type BidPanelProps = {
   chitId: string;
   memberId: string;
+  memberSlotId?: string;
   chitValue: number;
   isBiddingOpen: boolean;
   currentMonthIndex: number;
@@ -16,6 +17,7 @@ type BidPanelProps = {
 type BidRow = {
   id: string;
   memberId: string;
+  memberSlotId?: string;
   memberName?: string;
   discount: number;
   bidAmount: number;
@@ -43,6 +45,7 @@ const fmtMoney = (n: number) => `₹${n.toLocaleString("en-IN")}`;
 const BidPanel: FC<BidPanelProps> = ({
   chitId,
   memberId,
+  memberSlotId,
   chitValue,
   isBiddingOpen,
   currentMonthIndex,
@@ -114,8 +117,9 @@ const BidPanel: FC<BidPanelProps> = ({
   const isBlockedFromBidding = useMemo(() => {
     if (!memberId) return false;
     if (isWinnerThisMonth) return true;
+    if (memberSlotId && blockedWinners.includes(memberSlotId)) return true;
     return blockedWinners.includes(memberId);
-  }, [blockedWinners, memberId, isWinnerThisMonth]);
+  }, [blockedWinners, memberId, memberSlotId, isWinnerThisMonth]);
 
   const canPlaceBid = useMemo(
     () =>
@@ -212,6 +216,7 @@ const BidPanel: FC<BidPanelProps> = ({
               r._id ?? r.id ?? Math.random().toString(36).slice(2),
             );
             const mId = toStr(r.memberId ?? "");
+            const mSlotId = toStr(r.memberSlotId ?? r.slotId ?? "");
             const memberName =
               typeof r.memberName === "string" && r.memberName.trim()
                 ? r.memberName.trim()
@@ -233,6 +238,7 @@ const BidPanel: FC<BidPanelProps> = ({
             return {
               id,
               memberId: mId,
+              memberSlotId: mSlotId || undefined,
               memberName,
               discount,
               bidAmount,
@@ -486,6 +492,7 @@ const BidPanel: FC<BidPanelProps> = ({
           credentials: "include",
           body: JSON.stringify({
             memberId,
+            memberSlotId,
             bidAmount: myBidAmount,
             monthIndex: currentMonthIndex,
           }),
@@ -535,6 +542,7 @@ const BidPanel: FC<BidPanelProps> = ({
             r._id ?? r.id ?? Math.random().toString(36).slice(2),
           );
           const mId = toStr(r.memberId ?? "");
+          const mSlotId = toStr(r.memberSlotId ?? r.slotId ?? "");
           const memberName =
             typeof r.memberName === "string" && r.memberName.trim()
               ? r.memberName.trim()
@@ -556,6 +564,7 @@ const BidPanel: FC<BidPanelProps> = ({
           return {
             id,
             memberId: mId,
+            memberSlotId: mSlotId || undefined,
             memberName,
             discount,
             bidAmount,
@@ -575,8 +584,12 @@ const BidPanel: FC<BidPanelProps> = ({
 
   const myCurrentBid = useMemo(() => {
     if (!memberId || !bids.length) return null;
-    return bids.find((b) => b.memberId === memberId) ?? null;
-  }, [bids, memberId]);
+    return bids.find((b) => {
+      if (b.memberId !== memberId) return false;
+      if (!memberSlotId) return true;
+      return b.memberSlotId === memberSlotId;
+    }) ?? null;
+  }, [bids, memberId, memberSlotId]);
 
   const winnerBanner = useMemo(() => {
     if (!auctionInfo) return null;
@@ -686,7 +699,8 @@ const BidPanel: FC<BidPanelProps> = ({
           </div>
           <div>
             by{" "}
-            {topBid.memberId === memberId
+            {topBid.memberId === memberId &&
+            (!memberSlotId || topBid.memberSlotId === memberSlotId)
               ? `${getMemberLabel(topBid)} (you)`
               : getMemberLabel(topBid)}
           </div>
@@ -788,7 +802,8 @@ const BidPanel: FC<BidPanelProps> = ({
                 {bids.map((b) => (
                   <tr key={b.id} className="border-t">
                     <td className="p-1">
-                      {b.memberId === memberId
+                      {b.memberId === memberId &&
+                      (!memberSlotId || b.memberSlotId === memberSlotId)
                         ? `${getMemberLabel(b)} (you)`
                         : getMemberLabel(b)}
                     </td>

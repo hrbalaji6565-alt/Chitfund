@@ -45,6 +45,9 @@ interface EMI {
   paymentDate?: string;
   transactionId?: string;
   utrNumber?: string;
+  paymentRequestStatus?: "pending" | "rejected" | null;
+  paymentRequestUtr?: string | null;
+  paymentRequestDate?: string | null;
 }
 
 interface LoanDetails {
@@ -106,7 +109,6 @@ const UPIQRCode: React.FC<{ emi: EMI }> = ({ emi }) => {
           value={upiString}
           size={184}
           level="M"
-          includeMargin={false}
         />
       </div>
     );
@@ -130,7 +132,6 @@ export default function LoanDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [paymentLoading, setPaymentLoading] = useState<number | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState<EMI | null>(null);
-  const [paymentMode, setPaymentMode] = useState<"UPI">("UPI");
   const [utrNumber, setUtrNumber] = useState("");
   const [showQR, setShowQR] = useState(false);
 
@@ -213,7 +214,7 @@ export default function LoanDetailPage() {
       const data = await response.json();
 
       if (data.success) {
-        toast.success("EMI payment recorded successfully!");
+        toast.success("Payment submitted. Waiting for admin approval.");
         
         // Close modal and reset form
         setShowPaymentModal(null);
@@ -285,6 +286,8 @@ export default function LoanDetailPage() {
 
   const getEMIStatusColor = (emi: EMI) => {
     if (emi.status === "paid") return "bg-green-100 text-green-800";
+    if (emi.paymentRequestStatus === "pending") return "bg-yellow-100 text-yellow-800";
+    if (emi.paymentRequestStatus === "rejected") return "bg-red-100 text-red-800";
     if (emi.isPastMonth && emi.status === "pending") return "bg-red-100 text-red-800";
     if (emi.isCurrentMonth) return "bg-blue-100 text-blue-800";
     return "bg-gray-100 text-gray-800";
@@ -292,6 +295,8 @@ export default function LoanDetailPage() {
 
   const getEMIStatusText = (emi: EMI) => {
     if (emi.status === "paid") return "Paid";
+    if (emi.paymentRequestStatus === "pending") return "Approval Pending";
+    if (emi.paymentRequestStatus === "rejected") return "Rejected";
     if (emi.isPastMonth && emi.status === "pending") return "Overdue";
     if (emi.isCurrentMonth) return "Due Now";
     return "Upcoming";
@@ -299,6 +304,8 @@ export default function LoanDetailPage() {
 
   const getEMIIcon = (emi: EMI) => {
     if (emi.status === "paid") return <CheckCircle size={16} className="text-green-600" />;
+    if (emi.paymentRequestStatus === "pending") return <Clock size={16} className="text-yellow-600" />;
+    if (emi.paymentRequestStatus === "rejected") return <AlertCircle size={16} className="text-red-600" />;
     if (emi.isPastMonth && emi.status === "pending") return <AlertCircle size={16} className="text-red-600" />;
     if (emi.isCurrentMonth) return <Clock size={16} className="text-blue-600" />;
     return <Calendar size={16} className="text-gray-400" />;
@@ -318,6 +325,7 @@ export default function LoanDetailPage() {
   // Check if EMI payment is enabled based on current date vs due date
   const isPaymentEnabled = (emi: EMI) => {
     if (emi.status === "paid") return false;
+    if (emi.paymentRequestStatus === "pending") return false;
     
     const currentDate = new Date();
     const dueDate = new Date(emi.dueDate);
@@ -329,6 +337,12 @@ export default function LoanDetailPage() {
   // Get helper text for disabled payment buttons
   const getPaymentHelperText = (emi: EMI) => {
     if (emi.status === "paid") return "";
+    if (emi.paymentRequestStatus === "pending") {
+      return "Payment submitted. Waiting for admin approval.";
+    }
+    if (emi.paymentRequestStatus === "rejected") {
+      return "Last payment was rejected. Please submit again.";
+    }
     
     const currentDate = new Date();
     const dueDate = new Date(emi.dueDate);
@@ -521,6 +535,16 @@ export default function LoanDetailPage() {
                           {emi.transactionId && ` (${emi.transactionId})`}
                         </p>
                       )}
+                      {emi.status !== "paid" && emi.paymentRequestStatus === "pending" && (
+                        <p className="text-sm text-yellow-700">
+                          Submitted UTR: {emi.paymentRequestUtr || "N/A"} (approval pending)
+                        </p>
+                      )}
+                      {emi.status !== "paid" && emi.paymentRequestStatus === "rejected" && (
+                        <p className="text-sm text-red-600">
+                          Previous payment rejected. Submit payment again.
+                        </p>
+                      )}
                       {helperText && (
                         <p className="text-sm text-amber-600">{helperText}</p>
                       )}
@@ -553,7 +577,7 @@ export default function LoanDetailPage() {
                           disabled
                           className="min-w-[80px] opacity-50"
                         >
-                          Not Due Yet
+                          {emi.paymentRequestStatus === "pending" ? "Pending" : "Not Due Yet"}
                         </Button>
                       </div>
                     )}
@@ -575,8 +599,8 @@ export default function LoanDetailPage() {
 
       {/* Payment Modal */}
       {showPaymentModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/35 backdrop-blur-[1px] flex items-center justify-center">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto shadow-2xl border border-gray-200">
             <h3 className="text-lg font-semibold mb-4">
               Pay EMI - Month {showPaymentModal.monthNumber}
             </h3>
@@ -664,7 +688,7 @@ export default function LoanDetailPage() {
                   disabled={paymentLoading === showPaymentModal.monthNumber}
                   className="flex-1"
                 >
-                  {paymentLoading === showPaymentModal.monthNumber ? "Processing..." : "Confirm Payment"}
+                  {paymentLoading === showPaymentModal.monthNumber ? "Submitting..." : "Submit for Approval"}
                 </Button>
               </div>
             </div>

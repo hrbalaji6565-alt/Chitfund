@@ -111,6 +111,9 @@ type AllocationItem = {
 
 type FundView = {
   id: string;
+  groupRefId: string;
+  memberSlotId?: string;
+  memberSlotLabel?: string;
   fundName: string;
   groupName: string;
   totalAmount: number;
@@ -128,10 +131,36 @@ type FundView = {
 };
 
 type MemberFundSummary = {
-  groupId: string;
+  summaryKey: string;
   totalFunds: number;
+  paidTillNow: number;
   collected: number;
+  currentMonthPending: number;
   pending: number;
+};
+
+type MemberSlot = {
+  memberId: string;
+  slotId: string;
+};
+
+const normalizeMemberSlots = (membersRaw: unknown): MemberSlot[] => {
+  if (!Array.isArray(membersRaw)) return [];
+  const out: MemberSlot[] = [];
+  for (let i = 0; i < membersRaw.length; i += 1) {
+    const m = membersRaw[i];
+    if (typeof m === "string") {
+      out.push({ memberId: m, slotId: `${m}:legacy:${i + 1}` });
+      continue;
+    }
+    if (isRecord(m)) {
+      const memberId = idStr(m.memberId ?? m._id ?? m.id);
+      if (!memberId) continue;
+      const slotId = idStr(m.slotId ?? m.memberSlotId) || `${memberId}:legacy:${i + 1}`;
+      out.push({ memberId, slotId });
+    }
+  }
+  return out;
 };
 
 /* ---------- Payment panel (per member × group) ---------- */
@@ -139,10 +168,14 @@ type MemberFundSummary = {
 function PaymentPanel({
   groupObj,
   memberId,
+  memberSlotId,
+  summaryKey,
   onSummaryChange,
 }: {
   groupObj: unknown;
   memberId: string;
+  memberSlotId?: string;
+  summaryKey: string;
   onSummaryChange?: (summary: MemberFundSummary) => void;
 })  {
   const [payments, setPayments] = useState<AnyObject[]>([]);
@@ -269,10 +302,13 @@ function PaymentPanel({
 
       return unique.filter((p) => {
         const mid = extractPaymentMemberId(p);
-        return Boolean(mid && mid === memberId);
+        if (!mid || mid !== memberId) return false;
+        if (!memberSlotId) return true;
+        const sid = toStr(p.memberSlotId ?? (isRecord(p.rawMeta) ? p.rawMeta.memberSlotId : ""));
+        return sid === memberSlotId;
       });
     },
-    [memberId],
+    [memberId, memberSlotId],
   );
 
   useEffect(() => {
@@ -297,7 +333,7 @@ function PaymentPanel({
           gid,
         )}/payments?memberId=${encodeURIComponent(
           memberId,
-        )}&all=true`;
+        )}&all=true${memberSlotId ? `&memberSlotId=${encodeURIComponent(memberSlotId)}` : ""}`;
 
         const res = await fetch(url, { credentials: "include" });
         const j: unknown = await res.json().catch(() => []);
@@ -323,7 +359,7 @@ function PaymentPanel({
     return () => {
       alive = false;
     };
-  }, [groupObj, memberId, normalizeAndFilterPayments]);
+  }, [groupObj, memberId, memberSlotId, normalizeAndFilterPayments]);
 
   const parseAllocations = (
     raw: AnyObject,
@@ -657,6 +693,11 @@ function PaymentPanel({
             (auctionRaw as { winner?: unknown }).winner ??
             "",
         );
+        const winningMemberSlotId = toStr(
+          (auctionRaw as { winningMemberSlotId?: unknown }).winningMemberSlotId ??
+            (auctionRaw as { winnerSlotId?: unknown }).winnerSlotId ??
+            "",
+        );
         const winningPayout = toNum(
           auctionRaw.winningPayout ??
             (auctionRaw as { payoutToWinner?: unknown })
@@ -664,7 +705,12 @@ function PaymentPanel({
             0,
         );
 
-        if (winningMemberId && winningMemberId === memberId) {
+        const isWinningSlot =
+          winningMemberId &&
+          winningMemberId === memberId &&
+          (memberSlotId ? winningMemberSlotId === memberSlotId : true);
+
+        if (isWinningSlot) {
           setMyWinningPayout(winningPayout);
         } else {
           setMyWinningPayout(0);
@@ -677,8 +723,10 @@ function PaymentPanel({
           for (const d of distRaw) {
             if (!isRecord(d)) continue;
             const mid = idStr(d.memberId ?? d.id ?? "");
+            const sid = idStr(d.memberSlotId ?? d.slotId ?? "");
             if (!mid) continue;
-            if (mid === memberId) {
+            const slotMatch = memberSlotId ? sid === memberSlotId : true;
+            if (mid === memberId && slotMatch) {
               myShare = toNum(d.amount, 0);
               break;
             }
@@ -725,7 +773,7 @@ function PaymentPanel({
     return () => {
       alive = false;
     };
-  }, [groupObj, memberId, curMonth]);
+  }, [groupObj, memberId, memberSlotId, curMonth]);
 
   const expectedThisMonth = Math.max(
     0,
@@ -838,19 +886,29 @@ function PaymentPanel({
       0,
       effectiveTotalPayable - totalPaidPrincipal,
     );
+    const paidTillNow = Math.round(totalPaidPrincipal);
+    const collectedWithAuction = Math.round(
+      totalPaidPrincipal + Math.max(0, myWinningPayout),
+    );
+    const currentMonthPending = Math.round(monthlyRemaining);
 
     return {
-      groupId: gid,
+      summaryKey,
       totalFunds: totalFundsForMember,
-      collected: Math.round(totalPaidPrincipal),
+      paidTillNow,
+      collected: collectedWithAuction,
+      currentMonthPending,
       pending: Math.round(pendingForMember),
     };
   }, [
+    summaryKey,
     groupObj,
     perMember,
     totalMonthsFromModel,
     monthsSummary,
     expectedThisMonth,
+    myWinningPayout,
+    monthlyRemaining,
   ]);
 
   useEffect(() => {
@@ -961,6 +1019,9 @@ function PaymentPanel({
 
       const fd = new FormData();
       fd.append("memberId", memberId);
+      if (memberSlotId) {
+        fd.append("memberSlotId", memberSlotId);
+      }
       fd.append("amount", String(amount));
       fd.append("monthIndex", String(curMonth));
       if (note) fd.append("note", note);
@@ -1051,7 +1112,7 @@ function PaymentPanel({
         gid,
       )}/payments?memberId=${encodeURIComponent(
         memberId,
-      )}&all=true`;
+      )}&all=true${memberSlotId ? `&memberSlotId=${encodeURIComponent(memberSlotId)}` : ""}`;
       const pr = await fetch(pUrl, {
         credentials: "include",
       });
@@ -1506,18 +1567,20 @@ export default function UserActiveFunds() {
   const handleMemberSummaryChange = useCallback(
     (summary: MemberFundSummary) => {
       setMemberFundSummaries((prev) => {
-        const prevForGroup = prev[summary.groupId];
+        const prevForGroup = prev[summary.summaryKey];
         if (
           prevForGroup &&
           prevForGroup.totalFunds === summary.totalFunds &&
+          prevForGroup.paidTillNow === summary.paidTillNow &&
           prevForGroup.collected === summary.collected &&
+          prevForGroup.currentMonthPending === summary.currentMonthPending &&
           prevForGroup.pending === summary.pending
         ) {
           return prev;
         }
         return {
           ...prev,
-          [summary.groupId]: summary,
+          [summary.summaryKey]: summary,
         };
       });
     },
@@ -1537,17 +1600,9 @@ export default function UserActiveFunds() {
         groupRecord.collectedAmount ?? groupRecord.collected ?? 0,
       );
 
-      const override = memberFundSummaries[id];
-
-      const totalAmount = override
-        ? override.totalFunds
-        : baseTotal;
-      const collectedAmount = override
-        ? override.collected
-        : baseCollected;
-      const pendingAmount = override
-        ? override.pending
-        : Math.max(0, totalAmount - collectedAmount);
+      const totalAmount = baseTotal;
+      const collectedAmount = baseCollected;
+      const pendingAmount = Math.max(0, totalAmount - collectedAmount);
 
       const startDateStr = toStr(groupRecord.startDate ?? "");
 
@@ -1573,6 +1628,7 @@ export default function UserActiveFunds() {
 
       return {
         id,
+        groupRefId: id,
         fundName: toStr(
           groupRecord.fundName ?? groupRecord.name ?? "",
         ),
@@ -1601,41 +1657,48 @@ export default function UserActiveFunds() {
         raw: g,
       };
     });
-  }, [safeGroups, memberFundSummaries]);
+  }, [safeGroups]);
 
   const userFunds = useMemo<FundView[]>(() => {
-    if (Array.isArray(joined) && joined.length) {
-      const setJ = new Set(joined.map((x) => idStr(x)));
-      return funds.filter((f) => setJ.has(f.id));
-    }
+    const joinedSet =
+      Array.isArray(joined) && joined.length
+        ? new Set(joined.map((x) => idStr(x)))
+        : null;
 
-    return funds.filter((f) => {
+    const expanded: FundView[] = [];
+    for (const f of funds) {
+      if (joinedSet && !joinedSet.has(f.groupRefId)) continue;
       const grp = safeGroups.find((g) => {
         if (!isRecord(g)) return false;
         const gid = toStr(g._id ?? g.id ?? "");
-        return gid === f.id;
+        return gid === f.groupRefId;
       });
 
-      if (!grp || !isRecord(grp)) return false;
+      if (!grp || !isRecord(grp)) continue;
 
-      const membersRaw =
-        (grp.members as unknown) ??
-        grp.memberIds ??
-        grp.users ??
-        [];
+      const slots = normalizeMemberSlots(
+        (grp.members as unknown) ?? grp.memberIds ?? grp.users ?? [],
+      );
 
-      const members = Array.isArray(membersRaw) ? membersRaw : [];
-      if (members.length === 0) return false;
+      const mySlots = slots.filter((s) => s.memberId === authId);
+      if (!mySlots.length) continue;
 
-      return members.some((m) => {
-        if (typeof m === "string") return m === authId;
-        if (isRecord(m)) {
-          return idStr(m._id ?? m.id) === authId;
-        }
-        return false;
+      mySlots.forEach((s, idx) => {
+        const slotKey = `${f.groupRefId}::${s.slotId}`;
+        const override = memberFundSummaries[slotKey];
+        expanded.push({
+          ...f,
+          id: slotKey,
+          memberSlotId: s.slotId,
+          memberSlotLabel: `Slot ${idx + 1}`,
+          totalAmount: override ? override.totalFunds : f.totalAmount,
+          collectedAmount: override ? override.collected : 0,
+          pendingAmount: override ? override.pending : f.totalAmount,
+        });
       });
-    });
-  }, [joined, funds, safeGroups, authId]);
+    }
+    return expanded;
+  }, [joined, funds, safeGroups, authId, memberFundSummaries]);
 
   const filtered = userFunds.filter((f) =>
     `${f.fundName} ${f.groupName}`
@@ -1647,8 +1710,16 @@ export default function UserActiveFunds() {
     (sum, f) => sum + f.totalAmount,
     0,
   );
+  const totalPaidTillNow = Object.values(memberFundSummaries).reduce(
+    (sum, s) => sum + toNum(s.paidTillNow),
+    0,
+  );
   const totalCollected = userFunds.reduce(
     (sum, f) => sum + f.collectedAmount,
+    0,
+  );
+  const totalCurrentMonthPending = Object.values(memberFundSummaries).reduce(
+    (sum, s) => sum + toNum(s.currentMonthPending),
     0,
   );
   const totalPending = userFunds.reduce(
@@ -1669,7 +1740,7 @@ export default function UserActiveFunds() {
 
   return (
     <div className="space-y-6 p-1 sm:p-4 bg-[var(--bg-main)] min-h-screen">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card className="shadow-sm border">
           <CardContent className="p-4">
             <p className="text-sm text-gray-500">
@@ -1683,17 +1754,28 @@ export default function UserActiveFunds() {
         <Card className="shadow-sm border">
           <CardContent className="p-4">
             <p className="text-sm text-gray-500">
-              Collected
+              Paid Till Now
             </p>
-            <h3 className="text-2xl font-bold text-green-600">
-              ₹{totalCollected.toLocaleString()}
+            <h3 className="text-2xl font-bold text-blue-600">
+              ₹{totalPaidTillNow.toLocaleString()}
+            </h3>
+          </CardContent>
+        </Card>
+        
+        <Card className="shadow-sm border">
+          <CardContent className="p-4">
+            <p className="text-sm text-gray-500">
+              This Month Pending
+            </p>
+            <h3 className="text-2xl font-bold text-orange-600">
+              ₹{totalCurrentMonthPending.toLocaleString()}
             </h3>
           </CardContent>
         </Card>
         <Card className="shadow-sm border">
           <CardContent className="p-4">
             <p className="text-sm text-gray-500">
-              Pending
+              Total Pending
             </p>
             <h3 className="text-2xl font-bold text-red-600">
               ₹{totalPending.toLocaleString()}
@@ -1718,7 +1800,7 @@ export default function UserActiveFunds() {
             const grp = safeGroups.find((g) => {
               if (!isRecord(g)) return false;
               const gid = toStr(g._id ?? g.id ?? "");
-              return gid === f.id;
+              return gid === f.groupRefId;
             });
 
             const isOpen = openGroupId === f.id;
@@ -1743,6 +1825,11 @@ export default function UserActiveFunds() {
                             <p className="text-xs text-gray-500">
                               {f.groupName}
                             </p>
+                            {f.memberSlotLabel ? (
+                              <p className="text-[11px] text-indigo-600 font-medium">
+                                {f.memberSlotLabel}
+                              </p>
+                            ) : null}
                           </div>
                           <Badge
                             className={statusClass(f.status)}
@@ -1844,7 +1931,7 @@ export default function UserActiveFunds() {
                       </button>
                     </div>
 
-                    {isOpen && (
+                    {isOpen ? (
                       <div className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
                         <div className="space-y-3">
                           {grp && isRecord(grp) ? (
@@ -1913,6 +2000,7 @@ export default function UserActiveFunds() {
                                 <BidPanel
                                   chitId={chitId}
                                   memberId={authId}
+                                  memberSlotId={f.memberSlotId}
                                   chitValue={chitValue}
                                   isBiddingOpen={
                                     isBiddingOpen
@@ -1933,6 +2021,20 @@ export default function UserActiveFunds() {
                         <PaymentPanel
                           groupObj={grp ?? {}}
                           memberId={authId}
+                          memberSlotId={f.memberSlotId}
+                          summaryKey={f.id}
+                          onSummaryChange={
+                            handleMemberSummaryChange
+                          }
+                        />
+                      </div>
+                    ) : (
+                      <div className="hidden">
+                        <PaymentPanel
+                          groupObj={grp ?? {}}
+                          memberId={authId}
+                          memberSlotId={f.memberSlotId}
+                          summaryKey={f.id}
                           onSummaryChange={
                             handleMemberSummaryChange
                           }

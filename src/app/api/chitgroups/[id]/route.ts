@@ -3,6 +3,12 @@ import ChitGroup from "@/app/models/ChitGroup";
 import Member from "@/app/models/Member";
 import { NextResponse, type NextRequest } from "next/server";
 import mongoose from "mongoose";
+import {
+  createSlotId,
+  normalizeGroupMemberSlots,
+  slotsToStoredMembers,
+  uniqueMemberIds,
+} from "@/app/lib/groupSlots";
 
 /**
  * Helper: runtime-safe extractor for `context.params`.
@@ -40,11 +46,40 @@ export async function GET(_req: NextRequest, context: unknown) {
     }
 
     await dbConnect();
-    const group = await ChitGroup.findById(id).populate("members", "name email mobile").lean();
+    const group = await ChitGroup.findById(id).lean();
     if (!group) {
       return NextResponse.json({ success: false, error: "Group not found" }, { status: 404 });
     }
-    return NextResponse.json({ success: true, group });
+
+    const slots = normalizeGroupMemberSlots((group as Record<string, unknown>).members);
+    const memberIds = uniqueMemberIds(slots);
+    const memberDocs = memberIds.length
+      ? await Member.find({ _id: { $in: memberIds } }).select("name email mobile").lean()
+      : [];
+    const memberMap = new Map<string, Record<string, unknown>>();
+    for (const m of memberDocs as Record<string, unknown>[]) {
+      memberMap.set(String(m._id), m);
+    }
+
+    const membersWithProfile = slots.map((s) => {
+      const profile = memberMap.get(s.memberId);
+      return {
+        memberId: s.memberId,
+        _id: s.memberId,
+        slotId: s.slotId,
+        name: profile?.name,
+        email: profile?.email,
+        mobile: profile?.mobile,
+      };
+    });
+
+    return NextResponse.json({
+      success: true,
+      group: {
+        ...group,
+        members: membersWithProfile,
+      },
+    });
   } catch (error) {
     console.error("Error fetching group:", error);
     const msg = error instanceof Error ? error.message : "Failed to fetch group";
@@ -67,24 +102,49 @@ export async function PUT(request: NextRequest, context: unknown) {
       ? (rawBody as Record<string, unknown>)
       : {};
 
-    // if members provided, reconcile member lists
+    // if members provided, reconcile member lists (supports duplicate member slots)
     if (Array.isArray(updatesObj.members)) {
-      const incomingMemberIds = (updatesObj.members as unknown[])
-        .filter(isValidObjectId)
-        .map(String);
+      const incomingMemberIds = (updatesObj.members as unknown[]).map((m) => {
+        if (typeof m === "string" || typeof m === "number") return String(m);
+        if (m && typeof m === "object") {
+          const rec = m as Record<string, unknown>;
+          return String(rec.memberId ?? rec._id ?? rec.id ?? "");
+        }
+        return "";
+      }).filter(isValidObjectId);
 
       const group = await ChitGroup.findById(id).lean();
       if (!group) {
         return NextResponse.json({ success: false, error: "Group not found" }, { status: 404 });
       }
 
-      const currentMembers = Array.isArray(group.members) ? (group.members as unknown[]).map(String) : [];
+      const currentSlots = normalizeGroupMemberSlots((group as Record<string, unknown>).members);
+      const existingByMember = new Map<string, string[]>();
+      for (const slot of currentSlots) {
+        const arr = existingByMember.get(slot.memberId) ?? [];
+        arr.push(slot.slotId);
+        existingByMember.set(slot.memberId, arr);
+      }
 
-      const toAdd = incomingMemberIds.filter((x) => !currentMembers.includes(x));
-      const toRemove = currentMembers.filter((x) => !incomingMemberIds.includes(x));
+      const nextSlots = incomingMemberIds.map((mid, idx) => {
+        const arr = existingByMember.get(mid) ?? [];
+        const existingSlot = arr.shift();
+        if (arr.length) existingByMember.set(mid, arr);
+        else existingByMember.delete(mid);
+        return {
+          memberId: mid,
+          slotId: existingSlot ?? createSlotId(mid, idx + 1),
+        };
+      });
+
+      const prevUnique = new Set(uniqueMemberIds(currentSlots));
+      const nextUnique = new Set(uniqueMemberIds(nextSlots));
+
+      const toAdd = Array.from(nextUnique).filter((x) => !prevUnique.has(x));
+      const toRemove = Array.from(prevUnique).filter((x) => !nextUnique.has(x));
 
       // update group's members array
-      await ChitGroup.findByIdAndUpdate(id, { members: incomingMemberIds }, { new: true });
+      await ChitGroup.findByIdAndUpdate(id, { members: slotsToStoredMembers(nextSlots) }, { new: true });
 
       // add group id to newly added members
       if (toAdd.length) {

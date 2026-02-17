@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/app/components/ui/card";
 import { Badge } from "@/app/components/ui/badge";
+import Button from "@/app/components/ui/button";
 
 interface AdminLoanTransaction {
   _id: string;
@@ -22,6 +23,7 @@ export default function AdminLoanTransactionPage() {
   const [transactions, setTransactions] = useState<AdminLoanTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchTransactions();
@@ -79,6 +81,14 @@ export default function AdminLoanTransactionPage() {
     }
   };
 
+  const getStatusLabel = (status: string) => {
+    const s = status.toLowerCase();
+    if (s === "failed") return "Rejected";
+    if (s === "paid") return "Approved";
+    if (s === "pending") return "Pending";
+    return status;
+  };
+
   const getPaymentMethodColor = (method: string) => {
     switch (method.toLowerCase()) {
       case "upi":
@@ -87,6 +97,28 @@ export default function AdminLoanTransactionPage() {
         return "bg-green-100 text-green-800";
       default:
         return "bg-gray-100 text-gray-800";
+    }
+  };
+
+  const handleDecision = async (transactionId: string, action: "approve" | "reject") => {
+    try {
+      setUpdatingId(transactionId);
+      const res = await fetch("/api/admin/loan-transactions", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transactionId, action }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        setError(data?.message || "Failed to update transaction");
+        return;
+      }
+      await fetchTransactions();
+    } catch {
+      setError("Failed to update transaction");
+    } finally {
+      setUpdatingId(null);
     }
   };
 
@@ -150,6 +182,7 @@ export default function AdminLoanTransactionPage() {
                     <th className="pb-3 pt-3 px-3 font-medium">Status</th>
                     <th className="pb-3 pt-3 px-3 font-medium">UTR</th>
                     <th className="pb-3 pt-3 px-3 font-medium">Date</th>
+                    <th className="pb-3 pt-3 px-3 font-medium">Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -192,7 +225,7 @@ export default function AdminLoanTransactionPage() {
                       </td>
                       <td className="py-4 px-3">
                         <Badge className={getStatusColor(transaction.status)}>
-                          {transaction.status}
+                          {getStatusLabel(transaction.status)}
                         </Badge>
                       </td>
                       <td className="py-4 px-3">
@@ -204,6 +237,33 @@ export default function AdminLoanTransactionPage() {
                         <span className="text-gray-600 text-sm">
                           {formatDate(transaction.date)}
                         </span>
+                      </td>
+                      <td className="py-4 px-3">
+                        {transaction.status.toLowerCase() === "pending" ? (
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={updatingId === transaction._id}
+                              onClick={() => void handleDecision(transaction._id, "approve")}
+                              className="bg-green-600 hover:bg-green-700 text-white"
+                            >
+                              Approve
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={updatingId === transaction._id}
+                              onClick={() => void handleDecision(transaction._id, "reject")}
+                              className="text-red-600 border-red-200 hover:bg-red-50"
+                            >
+                              Reject
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-500">-</span>
+                        )}
                       </td>
                     </tr>
                   ))}

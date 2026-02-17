@@ -92,8 +92,9 @@ async function fetchPaymentsWithMeta(args: {
   all: boolean;
   monthIndex?: number;
   memberId?: string;
+  memberSlotId?: string;
 }) {
-  const { groupId, all, monthIndex, memberId } = args;
+  const { groupId, all, monthIndex, memberId, memberSlotId } = args;
 
   await dbConnect();
 
@@ -123,6 +124,9 @@ async function fetchPaymentsWithMeta(args: {
   if (memberId) {
     query.memberId = memberId;
   }
+  if (memberSlotId) {
+    query.memberSlotId = memberSlotId;
+  }
 
   const payments = await Payment.find(query).lean();
 
@@ -151,7 +155,17 @@ async function fetchPaymentsWithMeta(args: {
       auc.distributedToMembers.length > 0
     ) {
       // agar per-member distribution stored hai to usko use karo
-      if (memberId) {
+      if (memberSlotId) {
+        const entry = (auc.distributedToMembers as unknown[]).find((d) => {
+          if (!d || typeof d !== "object") return false;
+          const rec = d as UnknownRecord;
+          const sid = idStr(rec.memberSlotId ?? rec.slotId ?? rec.id);
+          return sid === memberSlotId;
+        });
+        if (entry && typeof entry === "object") {
+          perMemberDiscountThisMonth = toNum((entry as UnknownRecord).amount);
+        }
+      } else if (memberId) {
         const entry = (auc.distributedToMembers as unknown[]).find((d) => {
           if (!d || typeof d !== "object") return false;
           const rec = d as UnknownRecord;
@@ -208,6 +222,7 @@ export async function GET(req: NextRequest, context: unknown) {
     const all = url.searchParams.get("all") === "true";
     const monthIndexParam = url.searchParams.get("monthIndex");
     const memberIdParam = url.searchParams.get("memberId") ?? undefined;
+    const memberSlotIdParam = url.searchParams.get("memberSlotId") ?? undefined;
 
     const monthIndex = monthIndexParam
       ? Number(monthIndexParam)
@@ -218,6 +233,7 @@ export async function GET(req: NextRequest, context: unknown) {
       all,
       monthIndex,
       memberId: memberIdParam,
+      memberSlotId: memberSlotIdParam,
     });
 
     if (!result.ok) {
@@ -249,18 +265,21 @@ export async function POST(req: NextRequest, context: unknown) {
       all?: boolean;
       monthIndex?: number;
       memberId?: string;
+      memberSlotId?: string;
     };
 
     const all = body.all === true;
     const monthIndex =
       typeof body.monthIndex === "number" ? body.monthIndex : undefined;
     const memberId = body.memberId;
+    const memberSlotId = body.memberSlotId;
 
     const result = await fetchPaymentsWithMeta({
       groupId: id,
       all,
       monthIndex,
       memberId,
+      memberSlotId,
     });
 
     if (!result.ok) {

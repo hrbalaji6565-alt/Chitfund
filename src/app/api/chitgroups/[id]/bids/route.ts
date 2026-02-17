@@ -4,6 +4,7 @@ import dbConnect from "@/app/lib/mongodb";
 import Bid from "@/app/models/Bid";
 import ChitGroup from "@/app/models/ChitGroup";
 import mongoose from "mongoose";
+import { normalizeGroupMemberSlots } from "@/app/lib/groupSlots";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -76,9 +77,6 @@ function computePotMeta(group: UnknownRecord): {
   };
 }
 
-/**
- * Next 14+ helper: params can be a Promise → safely resolve
- */
 async function resolveParams(context: unknown): Promise<{ id: string }> {
   if (!context || typeof context !== "object") {
     throw new Error("Missing route context");
@@ -99,13 +97,8 @@ async function resolveParams(context: unknown): Promise<{ id: string }> {
   return { id };
 }
 
-// 4% admin commission
 const ADMIN_COMMISSION_RATE = 0.04;
 
-/**
- * GET: current month ke bids (BidPanel)
- * Optional query: ?monthIndex=2
- */
 export async function GET(req: NextRequest, context: unknown) {
   try {
     const { id: chitId } = await resolveParams(context);
@@ -145,7 +138,6 @@ export async function GET(req: NextRequest, context: unknown) {
       ? Math.max(1, Number(qMonth) || currentMonthIndex)
       : currentMonthIndex;
 
-    // Populate member name from Member model using ref in Bid.memberId
     const docs = await Bid.find({
       chitId,
       monthIndex,
@@ -174,10 +166,7 @@ export async function GET(req: NextRequest, context: unknown) {
         }
       }
 
-      // DB me discountOffered = sirf members ke liye total discount
       const memberDiscountTotal = toNum(rec.discountOffered);
-
-      // Total bid amount = base pot + admin commission + member discount
       const bidAmount = Math.max(
         0,
         basePot + adminCommissionAmount + memberDiscountTotal,
@@ -187,9 +176,10 @@ export async function GET(req: NextRequest, context: unknown) {
         _id: idStr(rec._id),
         chitId,
         memberId,
+        memberSlotId: idStr((rec as { memberSlotId?: unknown }).memberSlotId),
         memberName,
         monthIndex,
-        discount: memberDiscountTotal, // UI me dikhega "discount ₹X"
+        discount: memberDiscountTotal,
         bidAmount,
         createdAt:
           typeof rec.createdAt === "string"
@@ -211,9 +201,11 @@ export async function GET(req: NextRequest, context: unknown) {
       biddingOpen: (chitDoc as UnknownRecord).biddingOpen === true,
       biddingMonthIndex:
         (chitDoc as UnknownRecord).biddingMonthIndex ?? null,
+      blockedWinners: Array.isArray((chitDoc as UnknownRecord).blockedWinners)
+        ? ((chitDoc as UnknownRecord).blockedWinners as unknown[]).map(idStr)
+        : [],
     });
   } catch (error) {
-    // eslint-disable-next-line no-console
     console.error("GET /api/chitgroups/[id]/bids error:", error);
     const msg = error instanceof Error ? error.message : "Failed";
     return NextResponse.json(
@@ -223,14 +215,6 @@ export async function GET(req: NextRequest, context: unknown) {
   }
 }
 
-/**
- * POST: member bid place karega
- *
- * Body:
- * - memberId: string
- * - bidAmount: number  // total pot (base + admin commission + member discount)
- * - monthIndex?: number
- */
 export async function POST(req: NextRequest, context: unknown) {
   try {
     const { id: chitId } = await resolveParams(context);
@@ -244,6 +228,7 @@ export async function POST(req: NextRequest, context: unknown) {
 
     const body = (await req.json().catch(() => ({}))) as {
       memberId?: string;
+      memberSlotId?: string;
       bidAmount?: number;
       discountOffered?: number;
       monthIndex?: number;
@@ -285,7 +270,6 @@ export async function POST(req: NextRequest, context: unknown) {
         ? Math.max(1, Math.round(body.monthIndex))
         : currentMonthIndex;
 
-    // 🔐 check biddingOpen + month match
     const rawBiddingOpen = (group as { biddingOpen?: unknown }).biddingOpen;
     const rawBiddingMonth = (group as {
       biddingMonthIndex?: unknown;
@@ -307,21 +291,32 @@ export async function POST(req: NextRequest, context: unknown) {
       );
     }
 
-    // Member is part of chit?
-    const members = Array.isArray(group.members)
-      ? (group.members as unknown[]).map((m) => {
-          if (typeof m === "string") return m;
-          if (typeof m === "object" && m !== null) {
-            const obj = m as UnknownRecord;
-            return idStr(obj._id ?? obj.id);
-          }
-          return "";
-        })
-      : [];
-
-    if (!members.includes(memberId)) {
+    const slots = normalizeGroupMemberSlots(group.members);
+    const memberSlots = slots.filter((s) => s.memberId === memberId);
+    if (!memberSlots.length) {
       return NextResponse.json(
         { success: false, error: "Member not in this chit" },
+        { status: 403 },
+      );
+    }
+
+    const requestedSlotId = idStr(body.memberSlotId);
+    const memberSlotId =
+      requestedSlotId && memberSlots.some((s) => s.slotId === requestedSlotId)
+        ? requestedSlotId
+        : memberSlots[0].slotId;
+
+    const blockedWinners: string[] = Array.isArray(
+      (group as { blockedWinners?: unknown }).blockedWinners,
+    )
+      ? ((group as { blockedWinners?: unknown }).blockedWinners as unknown[])
+          .map(idStr)
+          .filter((x) => x)
+      : [];
+
+    if (blockedWinners.includes(memberSlotId) || blockedWinners.includes(memberId)) {
+      return NextResponse.json(
+        { success: false, error: "This member slot is blocked for bidding" },
         { status: 403 },
       );
     }
@@ -342,7 +337,7 @@ export async function POST(req: NextRequest, context: unknown) {
       return NextResponse.json(
         {
           success: false,
-          error: `Bid must be at least base pot + admin commission (min ₹${minAllowed})`,
+          error: `Bid must be at least base pot + admin commission (min Rs ${minAllowed})`,
         },
         { status: 400 },
       );
@@ -362,10 +357,10 @@ export async function POST(req: NextRequest, context: unknown) {
       discountOffered = 0;
     }
 
-    // same member + month → update
     const existing = await Bid.findOne({
       chitId,
       memberId,
+      memberSlotId,
       monthIndex,
     });
 
@@ -376,6 +371,7 @@ export async function POST(req: NextRequest, context: unknown) {
       await Bid.create({
         chitId,
         memberId,
+        memberSlotId,
         monthIndex,
         discountOffered,
       });
@@ -383,7 +379,6 @@ export async function POST(req: NextRequest, context: unknown) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    // eslint-disable-next-line no-console
     console.error("POST /api/chitgroups/[id]/bids error:", error);
     const msg = error instanceof Error ? error.message : "Failed";
     return NextResponse.json(

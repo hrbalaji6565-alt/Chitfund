@@ -6,9 +6,10 @@ export interface IAuction extends Document {
   monthIndex: number;
   totalPot: number;
   winningMemberId: string;
+  winningMemberSlotId?: string;
   winningBidAmount: number; // yahan hum "winning discount" rakhenge
   winningPayout: number;
-  distributedToMembers: Array<{ memberId: string; amount: number }>;
+  distributedToMembers: Array<{ memberId: string; memberSlotId?: string; amount: number }>;
   createdAt?: Date;
 }
 
@@ -18,10 +19,11 @@ const AuctionSchema = new Schema<IAuction>(
     monthIndex: { type: Number, required: true },
     totalPot: { type: Number, required: true },
     winningMemberId: { type: String, required: true },
+    winningMemberSlotId: { type: String },
     winningBidAmount: { type: Number, required: true }, // = winningDiscount
     winningPayout: { type: Number, required: true },
     distributedToMembers: {
-      type: [{ memberId: String, amount: Number }],
+      type: [{ memberId: String, memberSlotId: String, amount: Number }],
       default: [],
     },
   },

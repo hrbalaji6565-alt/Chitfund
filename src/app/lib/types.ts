@@ -39,7 +39,7 @@ export interface ChitGroup {
   interestRate?: number;
   penaltyPercent?: number;
   remarks?: string;
-  members?: string[]; // keep as previously
+  members?: unknown[]; // supports duplicate member slots
     winners?: string[];
 
   // timestamps

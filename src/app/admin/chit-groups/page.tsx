@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState, useMemo } from "react";
 import { Plus, Edit, Trash2, Search, Users, Calendar, CheckCircle, XCircle } from "lucide-react";
@@ -50,8 +50,8 @@ type FormDataShape = {
 
 const formFields: FormField[] = [
   { name: "name", label: "Group Name", type: "text", placeholder: "Group A - Premium" },
-  { name: "chitValue", label: "Chit Value (₹)", type: "number", placeholder: "100000" },
-  { name: "monthlyInstallment", label: "Monthly Installment (₹)", type: "number", placeholder: "5000" },
+  { name: "chitValue", label: "Chit Value (â‚¹)", type: "number", placeholder: "100000" },
+  { name: "monthlyInstallment", label: "Monthly Installment (â‚¹)", type: "number", placeholder: "5000" },
   { name: "totalMonths", label: "Total Months", type: "number", placeholder: "20" },
   { name: "totalMembers", label: "Total Members", type: "number", placeholder: "20" },
   { name: "startDate", label: "Start Date", type: "date" },
@@ -102,46 +102,6 @@ function addMonthsKeepDay(startDateStr: string, months: number): string {
   const mmStr = String(candidate.getMonth() + 1).padStart(2, "0");
   const ddStr = String(candidate.getDate()).padStart(2, "0");
   return `${yyyy}-${mmStr}-${ddStr}`;
-}
-
-/** Robust helper: does member belong to groupId? Accepts many server shapes */
-function memberBelongsToGroup(member: unknown, groupId?: string | null): boolean {
-  if (!groupId) return false;
-  if (!member || typeof member !== "object") return false;
-  const m = member as Record<string, unknown>;
-
-  // direct field: member.group (ObjectId or string or nested)
-  const g = m["group"];
-  if (typeof g === "string" && String(g) === String(groupId)) return true;
-  if (typeof g === "object" && g !== null) {
-    const gObj = g as Record<string, unknown>;
-    if (typeof gObj._id === "string" && String(gObj._id) === String(groupId)) return true;
-    if (typeof gObj._id === "number" && String(gObj._id) === String(groupId)) return true;
-  }
-
-  // legacy single id
-  if (m["groupId"] && String(m["groupId"]) === String(groupId)) return true;
-
-  // arrays: member.groups or member.groupIds or group_ids
-  const groupsField = m["groups"];
-  if (Array.isArray(groupsField)) {
-    for (const gg of groupsField) {
-      if (typeof gg === "string" && gg === String(groupId)) return true;
-      if (typeof gg === "object" && gg !== null) {
-        const ggObj = gg as Record<string, unknown>;
-        if (typeof ggObj._id === "string" && String(ggObj._id) === String(groupId)) return true;
-      }
-    }
-  }
-  const groupIds = m["groupIds"];
-  if (Array.isArray(groupIds)) {
-    if (groupIds.some((gId) => String(gId) === String(groupId))) return true;
-  }
-  const group_ids = m["group_ids"];
-  if (Array.isArray(group_ids)) {
-    if (group_ids.some((gId) => String(gId) === String(groupId))) return true;
-  }
-  return false;
 }
 
 /** Utility to produce a normalized groups array for a member (existing groups as strings) */
@@ -198,6 +158,32 @@ function getMemberMobile(member: unknown): string {
   return (m["mobile"] ? String(m["mobile"]) : "");
 }
 
+type GroupMemberSlotView = {
+  memberId: string;
+  slotId: string;
+};
+
+function getGroupSlots(groupMembers: unknown): GroupMemberSlotView[] {
+  if (!Array.isArray(groupMembers)) return [];
+  const out: GroupMemberSlotView[] = [];
+  for (let i = 0; i < groupMembers.length; i += 1) {
+    const item = groupMembers[i];
+    if (typeof item === "string" || typeof item === "number") {
+      const memberId = String(item);
+      out.push({ memberId, slotId: `${memberId}:legacy:${i + 1}` });
+      continue;
+    }
+    if (item && typeof item === "object") {
+      const rec = item as Record<string, unknown>;
+      const memberId = String(rec.memberId ?? rec._id ?? rec.id ?? "");
+      if (!memberId) continue;
+      const slotId = String(rec.slotId ?? rec.memberSlotId ?? `${memberId}:legacy:${i + 1}`);
+      out.push({ memberId, slotId });
+    }
+  }
+  return out;
+}
+
 export default function GroupsPage() {
   const dispatch = useDispatch<AppDispatch>();
   const groups = useSelector((state: RootState) => state.chitGroups.groups) as ServerGroup[];
@@ -209,6 +195,7 @@ export default function GroupsPage() {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [openMemberGroupKey, setOpenMemberGroupKey] = useState<string | null>(null);
   const [editingGroup, setEditingGroup] = useState<ServerGroup | null>(null);
   const [formData, setFormData] = useState<FormDataShape>({
     name: "",
@@ -372,19 +359,36 @@ export default function GroupsPage() {
     });
 
   function GroupCard({ group }: { group: ServerGroup }) {
-    const [isMemberDialogOpen, setIsMemberDialogOpen] = useState(false);
+    const groupKey = String(group._id ?? group.id ?? group.name ?? "");
+    const isMemberDialogOpen = openMemberGroupKey === groupKey;
     const [searchAvailable, setSearchAvailable] = useState("");
     const [selectedMemberToAdd, setSelectedMemberToAdd] = useState<string[]>([]);
 
-    // members assigned to this group (robust check)
-    const membersInGroup = useMemo(() => {
-      return (members || []).filter((m) => memberBelongsToGroup(m, group._id));
-    }, [members, group._id]);
+    const memberById = (() => {
+      const map = new Map<string, unknown>();
+      for (const m of members || []) {
+        const id = getMemberId(m);
+        if (id) map.set(id, m);
+      }
+      return map;
+    })();
 
-    // available members = those not in this group (robust check)
-    const availableMembers = useMemo(() => {
-      return (members || []).filter((m) => !memberBelongsToGroup(m, group._id));
-    }, [members, group._id]);
+    const groupSlots = useMemo(
+      () => getGroupSlots(group.members),
+      [group.members],
+    );
+
+    const membersInGroup = useMemo(
+      () =>
+        groupSlots.map((s) => ({
+          slotId: s.slotId,
+          memberId: s.memberId,
+          member: memberById.get(s.memberId),
+        })),
+      [groupSlots, memberById],
+    );
+
+    const availableMembers = members || [];
 
     const filteredAvailable = availableMembers.filter((m) => {
       const q = searchAvailable.trim().toLowerCase();
@@ -393,7 +397,7 @@ export default function GroupsPage() {
     });
 
     const openMembersDialog = () => {
-      setIsMemberDialogOpen(true);
+      setOpenMemberGroupKey(groupKey);
       setSearchAvailable("");
       setSelectedMemberToAdd([]);
     };
@@ -410,19 +414,12 @@ export default function GroupsPage() {
     const addSelectedMembersToGroup = async () => {
       if (!selectedMemberToAdd || selectedMemberToAdd.length === 0) return;
       try {
-        // compute current member IDs for this group (string array)
-        const current = membersInGroup.map((m) => getMemberId(m)).filter(Boolean) as string[];
-        // merge current + selected without duplicates
-        const mergedSet = new Set<string>([...current, ...selectedMemberToAdd.map(String)]);
-        const mergedArr = Array.from(mergedSet);
+        const current = groupSlots.map((s) => s.memberId);
+        const mergedArr = [...current, ...selectedMemberToAdd.map(String)];
 
         // Call updateGroup to set group's members array (server should reconcile member docs)
         if (!group._id) return;
         await dispatch(updateGroup({ id: group._id, updates: { members: mergedArr } as Partial<FormDataShape> })).unwrap();
-
-        // refresh local data
-        await dispatch(fetchMembers());
-        await dispatch(fetchGroups());
 
         // reset selection
         setSelectedMemberToAdd([]);
@@ -431,19 +428,29 @@ export default function GroupsPage() {
       }
     };
 
-    // remove a member from this group by updating the group's members array
-    const removeMemberFromGroup = async (memberId: string) => {
+    const addOneSlot = async (memberId: string) => {
       try {
-        // current members in group
-        const current = membersInGroup.map((m) => getMemberId(m)).filter(Boolean) as string[];
-        const updated = current.filter((id) => String(id) !== String(memberId));
+        const current = groupSlots.map((s) => s.memberId);
+        const updated = [...current, String(memberId)];
 
         if (!group._id) return;
         await dispatch(updateGroup({ id: group._id, updates: { members: updated } as Partial<FormDataShape> })).unwrap();
+      } catch (err) {
+        console.error("Failed to add member slot:", err);
+      }
+    };
 
-        // refresh data
-        await dispatch(fetchMembers());
-        await dispatch(fetchGroups());
+    // remove one slot from this group
+    const removeMemberFromGroup = async (slotId: string) => {
+      try {
+        const targetIndex = groupSlots.findIndex((s) => s.slotId === slotId);
+        if (targetIndex < 0) return;
+        const updated = groupSlots
+          .filter((_, idx) => idx !== targetIndex)
+          .map((s) => s.memberId);
+
+        if (!group._id) return;
+        await dispatch(updateGroup({ id: group._id, updates: { members: updated } as Partial<FormDataShape> })).unwrap();
       } catch (err) {
         console.error("Failed to remove member from group:", err);
       }
@@ -486,11 +493,11 @@ export default function GroupsPage() {
         <CardContent className="pt-4 space-y-2">
           <div className="flex justify-between">
             <span className="text-sm text-[var(--text-secondary)]">Chit Value</span>
-            <span className="font-semibold text-lg">₹{Number(group.chitValue).toLocaleString()}</span>
+            <span className="font-semibold text-lg">â‚¹{Number(group.chitValue).toLocaleString()}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-sm text-[var(--text-secondary)]">Monthly Installment</span>
-            <span className="font-semibold">₹{Number(group.monthlyInstallment).toLocaleString()}</span>
+            <span className="font-semibold">â‚¹{Number(group.monthlyInstallment).toLocaleString()}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-sm text-[var(--text-secondary)]">Penalty</span>
@@ -516,14 +523,14 @@ export default function GroupsPage() {
               <strong className="text-[var(--text-primary)]">{membersInGroup.length}</strong> assigned
             </div>
             <div className="flex gap-2">
-              <Button size="sm" onClick={() => openMembersDialog()}>
+              <Button type="button" size="sm" onClick={() => openMembersDialog()}>
                 Manage Members
               </Button>
             </div>
           </div>
         </CardContent>
 
-        <Dialog open={isMemberDialogOpen} onOpenChange={(open) => { setIsMemberDialogOpen(open); setSearchAvailable(""); setSelectedMemberToAdd([]); }}>
+        <Dialog open={isMemberDialogOpen} onOpenChange={(open) => { setOpenMemberGroupKey(open ? groupKey : null); setSearchAvailable(""); setSelectedMemberToAdd([]); }}>
           <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto bg-[var(--bg-card)] text-[var(--text-primary)]">
             <DialogHeader>
               <DialogTitle>Manage Members - {group.name}</DialogTitle>
@@ -538,13 +545,14 @@ export default function GroupsPage() {
                 ) : (
                   <div className="space-y-2">
                     {membersInGroup.map((m) => (
-                      <div key={getMemberId(m)} className="flex items-center justify-between gap-3 p-2 rounded-md bg-[var(--bg-muted)] border border-[var(--border-color)]">
+                      <div key={m.slotId} className="flex items-center justify-between gap-3 p-2 rounded-md bg-[var(--bg-muted)] border border-[var(--border-color)]">
                         <div>
-                          <div className="font-medium">{getMemberName(m)}</div>
-                          <div className="text-xs text-[var(--text-secondary)]">{getMemberEmail(m)} • {getMemberMobile(m)}</div>
+                          <div className="font-medium">{getMemberName(m.member) || `Member ID: ${m.memberId}`}</div>
+                          <div className="text-xs text-[var(--text-secondary)]">{getMemberEmail(m.member) || "-"} â€¢ {getMemberMobile(m.member) || "-"}</div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <Button variant="outline" size="sm" onClick={() => removeMemberFromGroup(String(getMemberId(m)))}>Remove</Button>
+                          <Button type="button" variant="outline" size="sm" onClick={() => addOneSlot(String(m.memberId))}>Add Slot</Button>
+                          <Button type="button" variant="outline" size="sm" onClick={() => removeMemberFromGroup(m.slotId)}>Remove Slot</Button>
                         </div>
                       </div>
                     ))}
@@ -574,8 +582,13 @@ export default function GroupsPage() {
                               />
                               <div>
                                 <div className="font-medium text-sm">{getMemberName(m)}</div>
-                                <div className="text-xs text-[var(--text-secondary)]">{getMemberEmail(m)} • {getMemberMobile(m)}</div>
+                                <div className="text-xs text-[var(--text-secondary)]">{getMemberEmail(m)} â€¢ {getMemberMobile(m)}</div>
                                 <div className="text-xs text-[var(--text-secondary)]">Currently in {getMemberGroupsArray(m).length || 0} group(s)</div>
+                                <div className="mt-1">
+                                  <Button type="button" size="sm" variant="outline" onClick={() => addOneSlot(id)}>
+                                    Add 1 Slot
+                                  </Button>
+                                </div>
                               </div>
                             </label>
                           );
@@ -585,8 +598,8 @@ export default function GroupsPage() {
                   </div>
 
                   <div className="w-36 flex flex-col gap-2">
-                    <Button size="sm" onClick={addSelectedMembersToGroup} disabled={!selectedMemberToAdd.length}>Add Selected</Button>
-                    <Button variant="outline" size="sm" onClick={clearSelection}>Clear</Button>
+                    <Button type="button" size="sm" onClick={addSelectedMembersToGroup} disabled={!selectedMemberToAdd.length}>Add Selected</Button>
+                    <Button type="button" variant="outline" size="sm" onClick={clearSelection}>Clear</Button>
                   </div>
                 </div>
                 <p className="text-xs text-[var(--text-secondary)] mt-2">Selected members will have this group&#39;s id appended to their <code>groups</code> array (allowing multi-group membership).</p>
@@ -594,7 +607,7 @@ export default function GroupsPage() {
             </div>
 
             <div className="px-6 pb-6 flex justify-end gap-3">
-              <Button variant="outline" onClick={() => setIsMemberDialogOpen(false)}>Close</Button>
+              <Button type="button" variant="outline" onClick={() => setOpenMemberGroupKey(null)}>Close</Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -648,9 +661,11 @@ export default function GroupsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredGroups.map((group, idx) => (
-          <GroupCard key={group._id ?? idx} group={group} />
+          <GroupCard key={String(group._id ?? group.id ?? `${group.name}-${group.startDate ?? group.createdAt ?? ""}-${idx}`)} group={group} />
         ))}
       </div>
     </div>
   );
 }
+
+

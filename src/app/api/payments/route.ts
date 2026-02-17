@@ -186,6 +186,9 @@ export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const memberId = url.searchParams.get("memberId") ?? undefined;
+    if (!memberId) {
+      return NextResponse.json([]);
+    }
 
     await dbConnect();
     const db = mongoose.connection.db;
@@ -197,11 +200,14 @@ export async function GET(req: Request) {
     }
     const payments = db.collection("payments");
 
-    const q: Record<string, unknown> = {};
-    if (memberId) {
-      // keep existing behavior – store raw memberId string
-      q.memberId = memberId;
-    }
+    const q: Record<string, unknown> = mongoose.Types.ObjectId.isValid(memberId)
+      ? {
+          $or: [
+            { memberId },
+            { memberId: new mongoose.Types.ObjectId(memberId) },
+          ],
+        }
+      : { memberId };
 
     const items = await payments
       .find(q)

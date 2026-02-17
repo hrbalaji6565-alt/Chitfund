@@ -4,6 +4,7 @@ import dbConnect from "@/app/lib/mongodb";
 import Loan from "@/app/models/loanModel.js";
 import LoanTransaction from "@/app/models/LoanTransaction";
 import { generateTransactionId } from "@/app/lib/loanUtils";
+import mongoose from "mongoose";
 
 export async function POST(req: Request, { params }: { params: Promise<{ loanId: string }> }) {
   try {
@@ -16,8 +17,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ loanId:
       return NextResponse.json({ success: false, message: "No token provided" }, { status: 401 });
     }
 
-    const decoded = verifyToken(token) as { id: string; userId: string };
-    if (!decoded?.id) {
+    const decoded = verifyToken(token) as { id?: string; userId?: string };
+    const memberId = decoded?.id || decoded?.userId;
+    if (!memberId) {
       return NextResponse.json({ success: false, message: "Invalid token" }, { status: 401 });
     }
 
@@ -50,7 +52,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ loanId:
 
     const loan = await Loan.findOne({ 
       _id: loanId, 
-      userId: decoded.id 
+      userId: memberId 
     });
 
     if (!loan) {
@@ -58,7 +60,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ loanId:
     }
 
     // Find the EMI in schedule
-    const emiIndex = loan.schedule.findIndex((emi: any) => emi.monthNumber === monthNumber);
+    const emiIndex = loan.schedule.findIndex((emi) => {
+      const rec = emi as unknown as Record<string, unknown>;
+      return Number(rec.monthNumber ?? 0) === Number(monthNumber);
+    });
     if (emiIndex === -1) {
       return NextResponse.json({ success: false, message: "EMI not found" }, { status: 404 });
     }
@@ -111,36 +116,51 @@ export async function POST(req: Request, { params }: { params: Promise<{ loanId:
       }, { status: 400 });
     }
 
-    // Generate transaction ID
+    const pendingAmount = Math.max(0, Number(emi.emiAmount ?? 0) - Number(emi.paidAmount ?? 0));
+    if (!Number.isFinite(Number(amount)) || Number(amount) <= 0 || Number(amount) > pendingAmount) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: `Invalid amount. Pending amount is ${pendingAmount}`,
+        },
+        { status: 400 }
+      );
+    }
+
+    const loanObjectId = mongoose.Types.ObjectId.isValid(String(loanId))
+      ? new mongoose.Types.ObjectId(String(loanId))
+      : null;
+
+    const existingPending = await LoanTransaction.findOne({
+      userId: memberId,
+      emiMonth: Number(monthNumber),
+      status: "Pending",
+      $or: loanObjectId ? [{ loanId }, { loanId: loanObjectId }] : [{ loanId }],
+    }).lean();
+
+    if (existingPending) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "This EMI payment is already pending for admin approval",
+        },
+        { status: 409 }
+      );
+    }
+
+    // Generate transaction ID for pending request
     const transactionId = generateTransactionId();
-
-    // CRITICAL: Update ONLY specific fields on the existing EMI object
-    // DO NOT overwrite the entire object as it removes required fields (dueDate, emiAmount, monthNumber)
-    // and causes Mongoose validation errors
-    loan.schedule[emiIndex].paidAmount = amount;
-    loan.schedule[emiIndex].status = "paid";
-    loan.schedule[emiIndex].paymentMode = "UPI"; // Force UPI for user payments
-    loan.schedule[emiIndex].paymentDate = new Date();
-    loan.schedule[emiIndex].utrNumber = utrNumber;
-    loan.schedule[emiIndex].transactionId = transactionId;
-
-    // Update next EMI due date
-    const nextUnpaidEmi = loan.schedule.find((e: any) => e.status === "pending");
-    loan.nextEMIDueDate = nextUnpaidEmi ? nextUnpaidEmi.dueDate : null;
-
-    // Save loan first
-    await loan.save();
 
     // Create loan transaction record ONLY after successful EMI update
     const loanTransaction = new LoanTransaction({
-      userId: decoded.id,
+      userId: memberId,
       loanId: loanId,
       loanName: loan.memberName || `Loan ${loanId}`,
       emiMonth: monthNumber,
       amount: amount,
       paymentMethod: "UPI", // Force UPI for user payments
       transactionType: "EMI Payment",
-      status: "Paid",
+      status: "Pending",
       utr: utrNumber,
       referenceId: transactionId,
       transactionDate: new Date(),
@@ -150,16 +170,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ loanId:
 
     return NextResponse.json({
       success: true,
-      message: "EMI payment recorded successfully",
+      message: "EMI payment submitted and pending admin approval",
       transactionId,
-      updatedEmi: loan.schedule[emiIndex],
       transaction: {
         id: loanTransaction._id,
         loanName: loanTransaction.loanName,
         emiMonth: loanTransaction.emiMonth,
         amount: loanTransaction.amount,
         paymentMethod: loanTransaction.paymentMethod,
-        status: loanTransaction.status,
+        status: "Pending",
         utr: loanTransaction.utr,
         transactionDate: loanTransaction.transactionDate,
       }

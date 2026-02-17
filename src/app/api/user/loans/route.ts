@@ -13,14 +13,15 @@ export async function GET(req: Request) {
       return NextResponse.json({ success: false, message: "No token provided" }, { status: 401 });
     }
 
-    const decoded = verifyToken(token) as { id: string; userId: string };
-    if (!decoded?.id) {
+    const decoded = verifyToken(token) as { id?: string; userId?: string };
+    const memberId = decoded?.id || decoded?.userId;
+    if (!memberId) {
       return NextResponse.json({ success: false, message: "Invalid token" }, { status: 401 });
     }
 
     await dbConnect();
 
-    const loans = await Loan.find({ userId: decoded.id })
+    const loans = await Loan.find({ userId: memberId })
       .select("memberName principal emiAmount startDate durationMonths schedule")
       .lean();
 

@@ -4,6 +4,7 @@ import ChitGroup from "@/app/models/ChitGroup";
 import Bid from "@/app/models/Bid";
 import Auction from "@/app/models/Auction";
 import mongoose from "mongoose";
+import { normalizeGroupMemberSlots } from "@/app/lib/groupSlots";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -135,11 +136,13 @@ export async function POST(req: NextRequest, context: unknown) {
         ? Math.max(1, Math.round(body.monthIndex))
         : currentMonthIndex;
 
+    const slots = normalizeGroupMemberSlots(group.members);
+    const slotIds = slots.map((s) => s.slotId);
+
     const blockedWinners: string[] = Array.isArray(
       (group as { blockedWinners?: unknown }).blockedWinners,
     )
-      ? ((group as { blockedWinners?: unknown })
-          .blockedWinners as unknown[])
+      ? ((group as { blockedWinners?: unknown }).blockedWinners as unknown[])
           .map(idStr)
           .filter((x) => x)
       : [];
@@ -160,9 +163,12 @@ export async function POST(req: NextRequest, context: unknown) {
 
     const filteredBids = bidDocs.filter((d) => {
       const rec = d as unknown as UnknownRecord;
+      const memberSlotId = idStr((rec as { memberSlotId?: unknown }).memberSlotId);
       const memberId = idStr(rec.memberId);
-      if (!memberId) return false;
-      if (blockedWinners.includes(memberId)) return false;
+      const slotKey = memberSlotId || memberId;
+      if (!slotKey) return false;
+      if (slotIds.length && memberSlotId && !slotIds.includes(memberSlotId)) return false;
+      if (blockedWinners.includes(slotKey)) return false;
       return true;
     });
 
@@ -189,65 +195,44 @@ export async function POST(req: NextRequest, context: unknown) {
 
     const winnerRec = winnerDoc as unknown as UnknownRecord;
     const winningMemberId = idStr(winnerRec.memberId);
+    const winningMemberSlotId = idStr(
+      (winnerRec as { memberSlotId?: unknown }).memberSlotId,
+    );
 
     const totalPot = meta.expectedMonthlyTotal;
     const winningDiscountTotal = Math.max(0, maxDiscount);
-
     const winningBidAmount = totalPot + winningDiscountTotal;
 
     const adminCommissionAmount = meta.adminCommissionAmount;
-
     const discountPoolForMembers = Math.max(
       0,
       winningDiscountTotal - adminCommissionAmount,
     );
 
-    const totalMembers = meta.totalMembers;
+    const totalSlots = Math.max(1, slots.length || meta.totalMembers);
+    const perMemberDiscount = Math.floor(discountPoolForMembers / totalSlots);
 
-    const memberIdsRaw: string[] = Array.isArray(group.members)
-      ? (group.members as unknown[]).map((m) => {
-          if (typeof m === "string") return m;
-          if (typeof m === "object" && m !== null) {
-            const obj = m as UnknownRecord;
-            return idStr(obj._id ?? obj.id);
-          }
-          return "";
-        })
-      : [];
-
-    const uniqueMemberIds = Array.from(
-      new Set(memberIdsRaw.filter((x) => x)),
-    );
-
-    const perMemberDiscount =
-      uniqueMemberIds.length > 0
-        ? Math.floor(discountPoolForMembers / uniqueMemberIds.length)
-        : 0;
-
-    const distributedToMembers = uniqueMemberIds.map((mid) => ({
-      memberId: mid,
+    const distributedToMembers = (slots.length ? slots : [{ memberId: winningMemberId, slotId: winningMemberSlotId || winningMemberId }]).map((s) => ({
+      memberId: s.memberId,
+      memberSlotId: s.slotId,
       amount: perMemberDiscount,
     }));
 
-    const usedDiscountForMembers =
-      perMemberDiscount * uniqueMemberIds.length;
-    const remainder =
-      discountPoolForMembers - usedDiscountForMembers;
-
+    const usedDiscountForMembers = perMemberDiscount * distributedToMembers.length;
+    const remainder = discountPoolForMembers - usedDiscountForMembers;
     if (remainder > 0 && distributedToMembers.length > 0) {
       distributedToMembers[0].amount += remainder;
     }
 
     const winningPayout = totalPot - winningDiscountTotal;
-
-    const blockedNext = Array.from(
-      new Set([...blockedWinners, winningMemberId]),
-    );
+    const winnerKey = winningMemberSlotId || winningMemberId;
+    const blockedNext = Array.from(new Set([...blockedWinners, winnerKey]));
 
     const updateDoc = {
       chitId,
       monthIndex,
       winningMemberId,
+      winningMemberSlotId,
       winningDiscount: winningDiscountTotal,
       winningBidAmount,
       winningPayout,
@@ -264,6 +249,8 @@ export async function POST(req: NextRequest, context: unknown) {
 
     if (existingAuction) {
       existingAuction.winningMemberId = updateDoc.winningMemberId;
+      (existingAuction as unknown as { winningMemberSlotId?: string }).winningMemberSlotId =
+        updateDoc.winningMemberSlotId;
       existingAuction.winningDiscount = updateDoc.winningDiscount;
       existingAuction.winningBidAmount = updateDoc.winningBidAmount;
       existingAuction.winningPayout = updateDoc.winningPayout;
@@ -289,6 +276,7 @@ export async function POST(req: NextRequest, context: unknown) {
     return NextResponse.json({
       success: true,
       winningMemberId,
+      winningMemberSlotId,
       winningDiscount: winningDiscountTotal,
       winningBidAmount,
       winningPayout,
@@ -298,7 +286,6 @@ export async function POST(req: NextRequest, context: unknown) {
       distributedToMembers,
     });
   } catch (error) {
-    // eslint-disable-next-line no-console
     console.error(
       "POST /api/chitgroups/[id]/run-auction error:",
       error,

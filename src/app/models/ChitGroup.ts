@@ -14,7 +14,7 @@ export interface IChitGroup extends Document {
   penaltyPercent: number;
   biddingOpen: boolean;
   biddingMonthIndex: number;
-  members?: mongoose.Types.ObjectId[]; // list of member ids
+  members?: unknown[]; // supports duplicate member slots
   winners?: mongoose.Types.ObjectId[];
 }
 
@@ -42,7 +42,7 @@ const chitGroupSchema = new Schema<IChitGroup>(
       type: Number,
       default: 1,
     },
-    members: [{ type: Schema.Types.ObjectId, ref: "Member" }], // members array
+    members: [{ type: Schema.Types.Mixed }], // supports { memberId, slotId } and legacy ids
     // NEW: winners array (members who already received disbursement)
     winners: [{ type: Schema.Types.ObjectId, ref: "Member", default: [] }],
   },

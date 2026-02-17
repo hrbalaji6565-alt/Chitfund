@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import dbConnect from "@/app/lib/mongodb";
 import { verifyToken } from "@/app/lib/jwt";
-import Member from "@/app/models/Member";
 import Loan from "@/app/models/loanModel";
 
 
@@ -26,7 +25,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
     }
 
-    const decoded: any = verifyToken(token);
+    const decoded = verifyToken(token) as { role?: string } | null;
     if (!decoded || decoded.role !== "admin") {
       return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
     }
@@ -36,35 +35,45 @@ export async function GET(req: NextRequest) {
     // Fetch all loans with member details - optimized query
     const loans = await Loan.find({})
       .populate("userId", "name userId mobile")
-      .select("userId memberName principal monthlyInterestPercent durationMonths startDate nextEMIDueDate emiAmount schedule.status createdAt updatedAt")
+      .select("userId memberName principal monthlyInterestPercent durationMonths durationType durationValue startDate endDate nextEMIDueDate emiAmount schedule.status createdAt updatedAt")
       .sort({ createdAt: -1 })
       .lean();
 
     // Format loans for response - only send necessary data
-    const formattedLoans = loans.map((loan: any) => {
-      const member = loan.userId || {};
+    const formattedLoans = loans.map((loan) => {
+      const loanRec = loan as unknown as Record<string, unknown>;
+      const member =
+        loanRec.userId && typeof loanRec.userId === "object"
+          ? (loanRec.userId as Record<string, unknown>)
+          : {};
       // Only send status count, not full schedule details
-      const schedule = loan.schedule || [];
-      const scheduleWithStatusOnly = schedule.map((item: any) => ({
-        status: item.status || "pending"
+      const schedule = Array.isArray(loanRec.schedule) ? loanRec.schedule : [];
+      const scheduleWithStatusOnly = schedule.map((item) => ({
+        status:
+          item && typeof item === "object" && "status" in (item as Record<string, unknown>)
+            ? String((item as Record<string, unknown>).status ?? "pending")
+            : "pending",
       }));
       
       return {
-        _id: loan._id,
-        memberId: loan.userId?._id || loan.userId,
-        memberName: loan.memberName || member.name || "Unknown",
-        memberUserId: member.userId || "",
-        memberMobile: member.mobile || "",
-        principal: loan.principal,
-        monthlyInterestPercent: loan.monthlyInterestPercent,
-        durationMonths: loan.durationMonths,
-        startDate: loan.startDate,
-        nextEMIDueDate: loan.nextEMIDueDate,
-        emiAmount: loan.emiAmount,
+        _id: loanRec._id,
+        memberId: member._id ?? loanRec.userId,
+        memberName: String(loanRec.memberName ?? member.name ?? "Unknown"),
+        memberUserId: String(member.userId ?? ""),
+        memberMobile: String(member.mobile ?? ""),
+        principal: Number(loanRec.principal ?? 0),
+        monthlyInterestPercent: Number(loanRec.monthlyInterestPercent ?? 0),
+        durationMonths: Number(loanRec.durationMonths ?? 0),
+        durationType: String(loanRec.durationType ?? "MONTHS"),
+        durationValue: Number(loanRec.durationValue ?? loanRec.durationMonths ?? 0),
+        startDate: loanRec.startDate,
+        endDate: loanRec.endDate,
+        nextEMIDueDate: loanRec.nextEMIDueDate,
+        emiAmount: Number(loanRec.emiAmount ?? 0),
         schedule: scheduleWithStatusOnly, // Minimal schedule data
-        status: loan.status || "active",
-        createdAt: loan.createdAt,
-        updatedAt: loan.updatedAt,
+        status: String(loanRec.status ?? "active"),
+        createdAt: loanRec.createdAt,
+        updatedAt: loanRec.updatedAt,
       };
     });
 

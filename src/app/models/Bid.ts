@@ -4,6 +4,7 @@ import mongoose, { Schema, Document, Model } from "mongoose";
 export interface IBid extends Document {
   chitId: string;
   memberId: string;
+  memberSlotId?: string;
   monthIndex: number;
   discountOffered: number;
   createdAt?: Date;
@@ -12,6 +13,7 @@ export interface IBid extends Document {
 const BidSchema = new Schema<IBid>({
   chitId: { type: String, required: true, index: true },
   memberId: { type: String, required: true, index: true },
+  memberSlotId: { type: String, index: true },
   monthIndex: { type: Number, required: true },
   discountOffered: { type: Number, required: true },
 }, { timestamps: true });

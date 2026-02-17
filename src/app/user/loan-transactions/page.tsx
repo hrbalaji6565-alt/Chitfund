@@ -91,6 +91,10 @@ export default function LoanTransactionsPage() {
     }
   };
 
+  const getStatusLabel = (status: string) => {
+    return status.toLowerCase() === "failed" ? "Rejected" : status;
+  };
+
   if (loading) {
     return (
       <div className="p-6">
@@ -175,7 +179,7 @@ export default function LoanTransactionsPage() {
                     </td>
                     <td className="py-2 px-2">
                       <Badge className={getStatusColor(transaction.status)}>
-                        {transaction.status}
+                        {getStatusLabel(transaction.status)}
                       </Badge>
                     </td>
                     <td className="py-2 px-2">

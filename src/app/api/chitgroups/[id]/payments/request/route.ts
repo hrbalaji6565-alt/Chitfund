@@ -2,8 +2,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import dbConnect from "@/app/lib/mongodb";
 import Payment, { PaymentType } from "@/app/models/Payment";
+import ChitGroup from "@/app/models/ChitGroup";
 import { uploadBase64Image } from "@/app/lib/cloudinary";
 import mongoose from "mongoose";
+import { normalizeGroupMemberSlots } from "@/app/lib/groupSlots";
 
 type FormDataLike = Record<string, FormDataEntryValue | null>;
 type UnknownRecord = Record<string, unknown>;
@@ -77,6 +79,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     const parsed = await parseRequest(req);
 
     const memberIdRaw = parsed["memberId"];
+    const memberSlotIdRaw = parsed["memberSlotId"] ?? parsed["slotId"];
     const amountRaw = parsed["amount"];
     const noteRaw =
       parsed["note"] ?? parsed["adminNote"] ?? parsed["rawMeta"];
@@ -92,6 +95,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       parsed["allocationsummary"];
 
     const memberId = memberIdRaw ? String(memberIdRaw) : undefined;
+    const memberSlotId = memberSlotIdRaw ? String(memberSlotIdRaw) : undefined;
     const amount =
       amountRaw !== undefined && amountRaw !== null
         ? Number(String(amountRaw))
@@ -121,6 +125,20 @@ export async function POST(req: NextRequest, context: RouteContext) {
         { error: "Invalid member id" },
         { status: 400 },
       );
+    }
+
+    if (memberSlotId) {
+      const groupDoc = await ChitGroup.findById(groupId).lean();
+      const slots = normalizeGroupMemberSlots((groupDoc as Record<string, unknown> | null)?.members);
+      const slotAllowed = slots.some(
+        (s) => s.slotId === memberSlotId && s.memberId === memberId,
+      );
+      if (!slotAllowed) {
+        return NextResponse.json(
+          { error: "Invalid member slot for this group/member" },
+          { status: 400 },
+        );
+      }
     }
 
     const status = "pending";
@@ -270,6 +288,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 const doc: {
   memberId: mongoose.Types.ObjectId;
   groupId: mongoose.Types.ObjectId;
+  memberSlotId?: string;
   amount: number;
   type: PaymentType;
   reference?: string;
@@ -282,6 +301,7 @@ const doc: {
 } = {
   memberId: new mongoose.Types.ObjectId(memberId),
   groupId: new mongoose.Types.ObjectId(groupId),
+  memberSlotId,
   amount: Number(amount),
   type: "UPI",
   reference,

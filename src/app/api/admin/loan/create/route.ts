@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
     }
 
-    const decoded: any = verifyToken(token);
+    const decoded = verifyToken(token) as { role?: string } | null;
     if (!decoded || decoded.role !== "admin") {
       return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
     }
@@ -43,8 +43,15 @@ export async function POST(req: NextRequest) {
       schedule 
     } = body;
 
-    if (!userId || !amount || !monthlyInterestPercent || !durationValue || !startDate) {
+    const principalNum = Number(amount);
+    const interestNum = Number(monthlyInterestPercent);
+    const durationNum = Number(durationValue);
+    const emiNum = Number(emiAmount);
+    if (!userId || !startDate || !Number.isFinite(principalNum) || principalNum <= 0 || !Number.isFinite(interestNum) || interestNum < 0 || !Number.isFinite(durationNum) || durationNum <= 0 || !Number.isFinite(emiNum) || emiNum <= 0) {
       return NextResponse.json({ success: false, message: "Missing required fields" }, { status: 400 });
+    }
+    if (durationType === "DAYS" && !endDate) {
+      return NextResponse.json({ success: false, message: "End date is required for day-based loans" }, { status: 400 });
     }
 
     await dbConnect();
@@ -57,6 +64,13 @@ export async function POST(req: NextRequest) {
 
     // Calculate next EMI due date based on duration type
     const startDateObj = new Date(startDate);
+    if (Number.isNaN(startDateObj.getTime())) {
+      return NextResponse.json({ success: false, message: "Invalid start date" }, { status: 400 });
+    }
+    const endDateObj = endDate ? new Date(endDate) : null;
+    if (durationType === "DAYS" && (!endDateObj || Number.isNaN(endDateObj.getTime()))) {
+      return NextResponse.json({ success: false, message: "Invalid end date" }, { status: 400 });
+    }
     let nextEMIDueDate;
     
     if (durationType === "MONTHS") {
@@ -65,11 +79,11 @@ export async function POST(req: NextRequest) {
       nextEMIDueDate.setMonth(nextEMIDueDate.getMonth() + 1);
     } else {
       // End date for day-based loans (single payment)
-      nextEMIDueDate = new Date(endDate);
+      nextEMIDueDate = new Date(endDateObj as Date);
     }
 
     // Use provided schedule or generate default
-    let emiSchedule = schedule || [];
+    const emiSchedule = Array.isArray(schedule) ? [...schedule] : [];
     if (!emiSchedule.length) {
       const baseEMIAmount = Number(emiAmount);
       
@@ -93,7 +107,7 @@ export async function POST(req: NextRequest) {
         emiSchedule.push({
           monthNumber: 1,
           emiAmount: baseEMIAmount,
-          dueDate: new Date(endDate),
+            dueDate: new Date(endDateObj as Date),
           penalty: 0,
           paidAmount: 0,
           status: "pending",
@@ -102,16 +116,16 @@ export async function POST(req: NextRequest) {
     }
 
     // Create loan document with enhanced fields
-    const loan = await Loan.create({
+    await Loan.create({
       userId,
-      principal: Number(amount),
-      monthlyInterestPercent: Number(monthlyInterestPercent),
-      durationMonths: durationType === "MONTHS" ? Number(durationValue) : (durationInMonths || 0),
+      principal: principalNum,
+      monthlyInterestPercent: interestNum,
+      durationMonths: durationType === "MONTHS" ? durationNum : (durationInMonths || 0),
       durationType: durationType,
-      durationValue: Number(durationValue),
+      durationValue: durationNum,
       startDate: new Date(startDate),
-      endDate: new Date(endDate),
-      emiAmount: Number(emiAmount),
+      endDate: endDateObj ?? new Date(startDateObj),
+      emiAmount: emiNum,
       nextEMIDueDate: nextEMIDueDate,
       memberName: member.name || "",
       schedule: emiSchedule,

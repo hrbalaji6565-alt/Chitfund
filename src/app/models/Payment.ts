@@ -13,6 +13,7 @@ export type PaymentType = "UPI" | "CASH" | "BANK" | "OTHER";
 export interface IPayment extends Document {
   memberId: mongoose.Types.ObjectId | string;
   groupId: mongoose.Types.ObjectId | string;
+  memberSlotId?: string;
   amount: number;
   type: PaymentType,
   reference?: string; // txn id / collector note / UTR
@@ -40,6 +41,7 @@ const PaymentSchema = new Schema<IPayment>(
   {
     memberId: { type: Schema.Types.ObjectId, ref: "Member", required: true },
     groupId: { type: Schema.Types.ObjectId, ref: "ChitGroup", required: true },
+    memberSlotId: { type: String, index: true },
     amount: { type: Number, required: true },
     type: {
       type: String,
