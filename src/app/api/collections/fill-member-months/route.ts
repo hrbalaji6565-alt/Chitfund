@@ -5,6 +5,7 @@ import Payment from "@/app/models/Payment";
 import MemberLedger from "@/app/models/MemberLedger";
 import Member from "@/app/models/Member";
 import mongoose from "mongoose";
+import { normalizeGroupMemberSlots } from "@/app/lib/groupSlots";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -22,67 +23,130 @@ type AllocationInput = {
   amount: number;
 };
 
+type FillTarget = {
+  memberId: string;
+  memberSlotId?: string;
+};
+
 export async function POST(req: NextRequest) {
   try {
     await dbConnect();
 
     const body = (await req.json().catch(() => ({}))) as UnknownRecord;
-
     const groupId = String(body.groupId ?? "");
 
-    // ✅ support single or multiple
-    const memberIdsRaw =
-      Array.isArray(body.memberIds)
-        ? body.memberIds
-        : body.memberId
+    const memberIdsRaw = Array.isArray(body.memberIds)
+      ? body.memberIds
+      : body.memberId
         ? [body.memberId]
         : [];
+    const memberSlotIdsRaw = Array.isArray(body.memberSlotIds)
+      ? body.memberSlotIds
+      : body.memberSlotId
+        ? [body.memberSlotId]
+        : [];
+    const membersRaw = Array.isArray(body.members) ? body.members : [];
 
     const allocationsRaw = body.allocations ?? body.months ?? [];
-
     const skipExisting =
       body.skipExisting === undefined ? true : Boolean(body.skipExisting);
-
     const forceLedgerDueAmount =
       body.forceLedgerDueAmount === undefined
         ? true
         : Boolean(body.forceLedgerDueAmount);
 
-    if (!groupId || !memberIdsRaw.length) {
+    if (
+      !groupId ||
+      (!memberIdsRaw.length && !memberSlotIdsRaw.length && !membersRaw.length)
+    ) {
       return NextResponse.json(
-        { success: false, error: "groupId and memberId(s) are required" },
-        { status: 400 }
+        {
+          success: false,
+          error:
+            "groupId and memberId(s) or memberSlotId(s) or members[] are required",
+        },
+        { status: 400 },
       );
     }
 
     if (!mongoose.Types.ObjectId.isValid(groupId)) {
       return NextResponse.json(
         { success: false, error: "Invalid groupId" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (!Array.isArray(allocationsRaw) || !allocationsRaw.length) {
       return NextResponse.json(
         { success: false, error: "allocations array is required" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const group = (await Group.findById(groupId).lean()) as
-      | UnknownRecord
-      | null;
-
+    const group = (await Group.findById(groupId).lean()) as UnknownRecord | null;
     if (!group) {
       return NextResponse.json(
         { success: false, error: "Group not found" },
-        { status: 404 }
+        { status: 404 },
+      );
+    }
+
+    const slots = normalizeGroupMemberSlots(group.members);
+    const slotToMember = new Map<string, string>();
+    for (const s of slots) {
+      slotToMember.set(String(s.slotId), String(s.memberId));
+    }
+
+    const targets: FillTarget[] = [];
+
+    for (const raw of membersRaw) {
+      if (!isRecord(raw)) continue;
+      const memberId = String(raw.memberId ?? raw._id ?? raw.id ?? "");
+      const memberSlotIdRaw = raw.memberSlotId ?? raw.slotId;
+      const memberSlotId =
+        memberSlotIdRaw === undefined || memberSlotIdRaw === null
+          ? undefined
+          : String(memberSlotIdRaw);
+
+      if (!mongoose.Types.ObjectId.isValid(memberId)) continue;
+      if (memberSlotId && slotToMember.get(memberSlotId) !== memberId) continue;
+      targets.push({ memberId, memberSlotId });
+    }
+
+    for (const rawSlotId of memberSlotIdsRaw) {
+      const slotId = String(rawSlotId ?? "");
+      if (!slotId) continue;
+      const memberId = slotToMember.get(slotId);
+      if (!memberId) continue;
+      targets.push({ memberId, memberSlotId: slotId });
+    }
+
+    for (const rawMemberId of memberIdsRaw) {
+      const memberId = String(rawMemberId ?? "");
+      if (!mongoose.Types.ObjectId.isValid(memberId)) continue;
+      targets.push({ memberId });
+    }
+
+    const targetMap = new Map<string, FillTarget>();
+    for (const t of targets) {
+      targetMap.set(`${t.memberId}::${t.memberSlotId ?? ""}`, t);
+    }
+    const finalTargets = Array.from(targetMap.values());
+
+    if (!finalTargets.length) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "No valid member/slot targets found in this group for the request",
+        },
+        { status: 400 },
       );
     }
 
     const totalMonths = Math.max(1, toNumber(group.totalMonths));
     const startDate = new Date(
-      typeof group.startDate === "string" ? group.startDate : new Date()
+      typeof group.startDate === "string" ? group.startDate : new Date(),
     );
 
     const allocations: AllocationInput[] = allocationsRaw
@@ -101,7 +165,7 @@ export async function POST(req: NextRequest) {
     if (!allocations.length) {
       return NextResponse.json(
         { success: false, error: "No valid allocations found" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -109,14 +173,12 @@ export async function POST(req: NextRequest) {
     let globalSkippedExisting = 0;
     let globalSkippedZero = 0;
     let globalUpdatedLedger = 0;
+    const memberTotals = new Map<string, number>();
 
-    // 🔁 LOOP MEMBERS
-    for (const rawMemberId of memberIdsRaw) {
-      const memberId = String(rawMemberId);
-
-      if (!mongoose.Types.ObjectId.isValid(memberId)) continue;
-
-      let memberTotalAmount = 0;
+    for (const target of finalTargets) {
+      const memberId = target.memberId;
+      const memberSlotId = target.memberSlotId;
+      let targetTotalAmount = 0;
 
       for (const alloc of allocations) {
         const month = alloc.monthIndex;
@@ -128,7 +190,7 @@ export async function POST(req: NextRequest) {
         }
 
         if (skipExisting) {
-          const existingPayment = await Payment.findOne({
+          const existingQuery: Record<string, unknown> = {
             groupId,
             memberId,
             status: "approved",
@@ -140,8 +202,12 @@ export async function POST(req: NextRequest) {
               { "rawMeta.allocationSummary.monthIndex": month },
               { "rawMeta.monthIndex": month },
             ],
-          }).select("_id");
+          };
+          if (memberSlotId) existingQuery.memberSlotId = memberSlotId;
 
+          const existingPayment = await Payment.findOne(existingQuery).select(
+            "_id",
+          );
           if (existingPayment) {
             globalSkippedExisting++;
             continue;
@@ -154,6 +220,7 @@ export async function POST(req: NextRequest) {
         const payment = await Payment.create({
           memberId: new mongoose.Types.ObjectId(memberId),
           groupId: new mongoose.Types.ObjectId(groupId),
+          memberSlotId,
           amount,
           type: "CASH",
           status: "approved",
@@ -175,6 +242,7 @@ export async function POST(req: NextRequest) {
           rawMeta: {
             collectedVia: "bulk-fill-member",
             monthIndex: month,
+            memberSlotId,
             allocationDetails: [
               {
                 monthIndex: month,
@@ -187,56 +255,66 @@ export async function POST(req: NextRequest) {
         });
 
         globalCreated++;
-        memberTotalAmount += amount;
+        targetTotalAmount += amount;
 
-        const ledgerMonthIdx = Math.max(0, month - 1);
+        // Ledger has no slot dimension; avoid overwriting across slots.
+        if (!memberSlotId) {
+          const ledgerMonthIdx = Math.max(0, month - 1);
+          const ledger = await MemberLedger.findOne({
+            memberId,
+            groupId,
+            monthIndex: ledgerMonthIdx,
+          });
 
-        const ledger = await MemberLedger.findOne({
-          memberId,
-          groupId,
-          monthIndex: ledgerMonthIdx,
-        });
+          if (ledger) {
+            ledger.paidAmount = amount;
+            ledger.penaltyAmount = 0;
+            if (forceLedgerDueAmount) {
+              ledger.dueAmount = amount;
+            }
+            ledger.status = "Paid";
+            await ledger.save();
 
-        if (ledger) {
-          ledger.paidAmount = amount;
-          ledger.penaltyAmount = 0;
-          if (forceLedgerDueAmount) {
-            ledger.dueAmount = amount;
+            await MemberLedger.findByIdAndUpdate(ledger._id, {
+              $addToSet: { payments: payment._id },
+            }).catch(() => {});
+
+            globalUpdatedLedger++;
           }
-          ledger.status = "Paid";
-          await ledger.save();
-
-          await MemberLedger.findByIdAndUpdate(ledger._id, {
-            $addToSet: { payments: payment._id },
-          }).catch(() => {});
-
-          globalUpdatedLedger++;
         }
       }
 
-      if (memberTotalAmount > 0) {
-        await Member.findByIdAndUpdate(memberId, {
-          $inc: {
-            totalPaid: memberTotalAmount,
-            pendingAmount: -memberTotalAmount,
-          },
-        }).catch(() => {});
+      if (targetTotalAmount > 0) {
+        memberTotals.set(
+          memberId,
+          (memberTotals.get(memberId) ?? 0) + targetTotalAmount,
+        );
       }
+    }
+
+    for (const [memberId, total] of memberTotals.entries()) {
+      await Member.findByIdAndUpdate(memberId, {
+        $inc: {
+          totalPaid: total,
+          pendingAmount: -total,
+        },
+      }).catch(() => {});
     }
 
     return NextResponse.json({
       success: true,
-      message: "Bulk member backfill completed",
+      message: "Bulk member/slot backfill completed",
       totalCreated: globalCreated,
       skippedExisting: globalSkippedExisting,
       skippedZero: globalSkippedZero,
       updatedLedger: globalUpdatedLedger,
+      targetsProcessed: finalTargets.length,
     });
   } catch (error) {
     console.error("POST /api/collections/fill-member-months error:", error);
     return NextResponse.json(
       { success: false, error: "Something went wrong" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

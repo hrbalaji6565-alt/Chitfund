@@ -9,6 +9,7 @@ const withPwa = withPWA({
 
 const nextConfig = {
   reactStrictMode: true,
+  turbopack: {},
 
   // ignore TS errors during build (Vercel safe)
   typescript: {

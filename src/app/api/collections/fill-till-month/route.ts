@@ -2,11 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/app/lib/mongodb";
 import Group from "@/app/models/ChitGroup";
 import Payment from "@/app/models/Payment";
+import { normalizeGroupMemberSlots } from "@/app/lib/groupSlots";
 
 type UnknownRecord = Record<string, unknown>;
-
-const isRecord = (v: unknown): v is UnknownRecord =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
 
 const toNumber = (v: unknown): number => {
   if (typeof v === "number") return Number.isFinite(v) ? v : 0;
@@ -14,21 +12,7 @@ const toNumber = (v: unknown): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
-const getMemberIds = (g: UnknownRecord): string[] => {
-  const membersRaw = g.members;
-  const result: string[] = [];
-  if (Array.isArray(membersRaw)) {
-    for (const m of membersRaw) {
-      if (typeof m === "string") {
-        result.push(m);
-      } else if (isRecord(m)) {
-        const id = m._id ?? m.id;
-        if (id !== undefined) result.push(String(id));
-      }
-    }
-  }
-  return result;
-};
+type SlotRef = { memberId: string; slotId: string };
 
 const computePerMemberInstallment = (
   g: UnknownRecord,
@@ -53,6 +37,16 @@ export async function POST(req: NextRequest) {
     const groupId = String(body.groupId ?? "");
     const tillMonthRaw = toNumber(body.tillMonth ?? 0);
     const tillMonth = Math.max(1, Math.round(tillMonthRaw));
+    const memberSlotIdsRaw = Array.isArray(body.memberSlotIds)
+      ? body.memberSlotIds
+      : body.memberSlotId
+        ? [body.memberSlotId]
+        : [];
+    const memberIdsRaw = Array.isArray(body.memberIds)
+      ? body.memberIds
+      : body.memberId
+        ? [body.memberId]
+        : [];
 
     if (!groupId || !tillMonth || tillMonth <= 0) {
       return NextResponse.json(
@@ -70,14 +64,41 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const members = getMemberIds(group);
-    const monthlyAmount = computePerMemberInstallment(group, members.length);
+    const slots = normalizeGroupMemberSlots(group.members);
+    const slotIdFilter = new Set(
+      memberSlotIdsRaw
+        .map((x) => String(x ?? "").trim())
+        .filter(Boolean),
+    );
+    const memberIdFilter = new Set(
+      memberIdsRaw
+        .map((x) => String(x ?? "").trim())
+        .filter(Boolean),
+    );
+    const filteredSlots = slots.filter((s) => {
+      if (slotIdFilter.size && slotIdFilter.has(String(s.slotId))) return true;
+      if (slotIdFilter.size) return false;
+      if (memberIdFilter.size) return memberIdFilter.has(String(s.memberId));
+      return true;
+    });
+
+    if ((slotIdFilter.size || memberIdFilter.size) && !filteredSlots.length) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "No matching slots found in this group for requested filter",
+        },
+        { status: 400 },
+      );
+    }
+
+    const monthlyAmount = computePerMemberInstallment(group, slots.length);
     const totalMonths = Math.max(1, toNumber(group.totalMonths));
     const targetMonth = Math.min(tillMonth, totalMonths);
 
-    if (!members.length) {
+    if (!filteredSlots.length) {
       return NextResponse.json(
-        { success: false, error: "No members in this group" },
+        { success: false, error: "No member slots in this group" },
         { status: 400 }
       );
     }
@@ -95,12 +116,15 @@ export async function POST(req: NextRequest) {
 
     let createdCount = 0;
 
-    for (const memberId of members) {
+    for (const slot of filteredSlots as SlotRef[]) {
+      const memberId = String(slot.memberId);
+      const memberSlotId = String(slot.slotId);
       for (let month = 1; month <= targetMonth; month++) {
 
-        const existingPayment = await Payment.findOne({
+        const existingQuery: Record<string, unknown> = {
           groupId,
           memberId,
+          memberSlotId,
           status: "approved",
           $or: [
             { "allocated.monthIndex": month },
@@ -110,7 +134,9 @@ export async function POST(req: NextRequest) {
             { "rawMeta.allocationSummary.monthIndex": month },
             { "rawMeta.monthIndex": month },
           ],
-        }).select("_id");
+        };
+
+        const existingPayment = await Payment.findOne(existingQuery).select("_id");
 
         if (!existingPayment) {
 
@@ -120,6 +146,7 @@ export async function POST(req: NextRequest) {
           const payment = new Payment({
             memberId,
             groupId,
+            memberSlotId,
             amount: monthlyAmount,
             type: "CASH",
             status: "approved",
@@ -134,6 +161,7 @@ export async function POST(req: NextRequest) {
             rawMeta: {
               collectedVia: "bulk-fill",
               monthIndex: month,
+              memberSlotId,
               allocationDetails: [
                 {
                   monthIndex: month,
@@ -153,8 +181,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `All members completed till M${targetMonth}`,
-      totalCreated: createdCount
+      message: `Member slots completed till M${targetMonth}`,
+      totalCreated: createdCount,
+      targetedSlots: filteredSlots.length,
     });
 
   } catch (error) {

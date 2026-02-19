@@ -104,14 +104,24 @@ export async function PUT(request: NextRequest, context: unknown) {
 
     // if members provided, reconcile member lists (supports duplicate member slots)
     if (Array.isArray(updatesObj.members)) {
-      const incomingMemberIds = (updatesObj.members as unknown[]).map((m) => {
-        if (typeof m === "string" || typeof m === "number") return String(m);
-        if (m && typeof m === "object") {
-          const rec = m as Record<string, unknown>;
-          return String(rec.memberId ?? rec._id ?? rec.id ?? "");
-        }
-        return "";
-      }).filter(isValidObjectId);
+      const incomingMembers = (updatesObj.members as unknown[])
+        .map((m) => {
+          if (typeof m === "string" || typeof m === "number") {
+            return { memberId: String(m), slotId: undefined as string | undefined };
+          }
+          if (m && typeof m === "object") {
+            const rec = m as Record<string, unknown>;
+            const memberId = String(rec.memberId ?? rec._id ?? rec.id ?? "");
+            const slotIdRaw = rec.slotId ?? rec.memberSlotId;
+            const slotId =
+              slotIdRaw === undefined || slotIdRaw === null
+                ? undefined
+                : String(slotIdRaw);
+            return { memberId, slotId };
+          }
+          return { memberId: "", slotId: undefined as string | undefined };
+        })
+        .filter((x) => isValidObjectId(x.memberId));
 
       const group = await ChitGroup.findById(id).lean();
       if (!group) {
@@ -126,11 +136,22 @@ export async function PUT(request: NextRequest, context: unknown) {
         existingByMember.set(slot.memberId, arr);
       }
 
-      const nextSlots = incomingMemberIds.map((mid, idx) => {
+      const nextSlots = incomingMembers.map((incoming, idx) => {
+        const mid = incoming.memberId;
         const arr = existingByMember.get(mid) ?? [];
-        const existingSlot = arr.shift();
-        if (arr.length) existingByMember.set(mid, arr);
-        else existingByMember.delete(mid);
+        let existingSlot: string | undefined;
+
+        if (incoming.slotId && arr.includes(incoming.slotId)) {
+          existingSlot = incoming.slotId;
+          const remaining = arr.filter((s) => s !== incoming.slotId);
+          if (remaining.length) existingByMember.set(mid, remaining);
+          else existingByMember.delete(mid);
+        } else {
+          existingSlot = arr.shift();
+          if (arr.length) existingByMember.set(mid, arr);
+          else existingByMember.delete(mid);
+        }
+
         return {
           memberId: mid,
           slotId: existingSlot ?? createSlotId(mid, idx + 1),

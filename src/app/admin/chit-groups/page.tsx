@@ -45,13 +45,13 @@ type FormDataShape = {
   status: "Active" | "Closed" | "Inactive";
   remarks: string;
   penaltyPercent?: number;
-  members?: string[];
+  members?: Array<string | { memberId: string; slotId?: string }>;
 };
 
 const formFields: FormField[] = [
   { name: "name", label: "Group Name", type: "text", placeholder: "Group A - Premium" },
-  { name: "chitValue", label: "Chit Value (â‚¹)", type: "number", placeholder: "100000" },
-  { name: "monthlyInstallment", label: "Monthly Installment (â‚¹)", type: "number", placeholder: "5000" },
+  { name: "chitValue", label: "Chit Value ()", type: "number", placeholder: "100000" },
+  { name: "monthlyInstallment", label: "Monthly Installment ()", type: "number", placeholder: "5000" },
   { name: "totalMonths", label: "Total Months", type: "number", placeholder: "20" },
   { name: "totalMembers", label: "Total Members", type: "number", placeholder: "20" },
   { name: "startDate", label: "Start Date", type: "date" },
@@ -414,8 +414,14 @@ export default function GroupsPage() {
     const addSelectedMembersToGroup = async () => {
       if (!selectedMemberToAdd || selectedMemberToAdd.length === 0) return;
       try {
-        const current = groupSlots.map((s) => s.memberId);
-        const mergedArr = [...current, ...selectedMemberToAdd.map(String)];
+        const current = groupSlots.map((s) => ({
+          memberId: s.memberId,
+          slotId: s.slotId,
+        }));
+        const mergedArr = [
+          ...current,
+          ...selectedMemberToAdd.map((id) => ({ memberId: String(id) })),
+        ];
 
         // Call updateGroup to set group's members array (server should reconcile member docs)
         if (!group._id) return;
@@ -430,8 +436,11 @@ export default function GroupsPage() {
 
     const addOneSlot = async (memberId: string) => {
       try {
-        const current = groupSlots.map((s) => s.memberId);
-        const updated = [...current, String(memberId)];
+        const current = groupSlots.map((s) => ({
+          memberId: s.memberId,
+          slotId: s.slotId,
+        }));
+        const updated = [...current, { memberId: String(memberId) }];
 
         if (!group._id) return;
         await dispatch(updateGroup({ id: group._id, updates: { members: updated } as Partial<FormDataShape> })).unwrap();
@@ -447,7 +456,7 @@ export default function GroupsPage() {
         if (targetIndex < 0) return;
         const updated = groupSlots
           .filter((_, idx) => idx !== targetIndex)
-          .map((s) => s.memberId);
+          .map((s) => ({ memberId: s.memberId, slotId: s.slotId }));
 
         if (!group._id) return;
         await dispatch(updateGroup({ id: group._id, updates: { members: updated } as Partial<FormDataShape> })).unwrap();
@@ -493,11 +502,11 @@ export default function GroupsPage() {
         <CardContent className="pt-4 space-y-2">
           <div className="flex justify-between">
             <span className="text-sm text-[var(--text-secondary)]">Chit Value</span>
-            <span className="font-semibold text-lg">â‚¹{Number(group.chitValue).toLocaleString()}</span>
+            <span className="font-semibold text-lg">{Number(group.chitValue).toLocaleString()}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-sm text-[var(--text-secondary)]">Monthly Installment</span>
-            <span className="font-semibold">â‚¹{Number(group.monthlyInstallment).toLocaleString()}</span>
+            <span className="font-semibold">{Number(group.monthlyInstallment).toLocaleString()}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-sm text-[var(--text-secondary)]">Penalty</span>

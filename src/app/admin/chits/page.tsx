@@ -1441,11 +1441,7 @@ function AdminChitsPage() {
                     {(() => {
                       const groupObj = getGroupById(openGroupId);
                       const slotList = normalizeGroupSlots(groupObj);
-                      const membersList = slotList.map((s) => s.slotId);
-                      for (const k of paymentsMatrix.keys()) {
-                        if (!membersList.includes(k)) membersList.push(k);
-                      }
-                      if (!membersList.length) {
+                      if (!slotList.length) {
                         return (
                           <tr>
                             <td className="p-2" colSpan={5}>
@@ -1455,12 +1451,40 @@ function AdminChitsPage() {
                         );
                       }
 
-                      return membersList.map((memberKey) => {
-                        const name = memberNamesMap[memberKey] ?? memberKey;
-                        const mm = paymentsMatrix.get(memberKey) ?? new Map();
-                        const paid = Number(
-                          mm.get(meta.currentMonthIndex) ?? 0,
+                      const slotsByMember = new Map<string, GroupSlot[]>();
+                      for (const s of slotList) {
+                        if (!slotsByMember.has(s.memberId)) {
+                          slotsByMember.set(s.memberId, []);
+                        }
+                        slotsByMember.get(s.memberId)!.push(s);
+                      }
+                      const preferredSlotIdByMember = new Map<string, string>();
+                      for (const [memberId, memberSlots] of slotsByMember.entries()) {
+                        // Keep legacy member-level payments pinned to the oldest slot.
+                        // This prevents re-shifting history to newly added slots.
+                        const preferred = memberSlots[0]?.slotId;
+                        if (preferred) preferredSlotIdByMember.set(memberId, preferred);
+                      }
+
+                      return slotList.map((slot) => {
+                        const name =
+                          memberNamesMap[slot.slotId] ??
+                          memberNamesMap[slot.memberId] ??
+                          slot.slotId;
+                        const paidBySlot = Number(
+                          paymentsMatrix
+                            .get(slot.slotId)
+                            ?.get(meta.currentMonthIndex) ?? 0,
                         );
+                        const paidByMember =
+                          preferredSlotIdByMember.get(slot.memberId) === slot.slotId
+                            ? Number(
+                              paymentsMatrix
+                                .get(slot.memberId)
+                                ?.get(meta.currentMonthIndex) ?? 0,
+                            )
+                            : 0;
+                        const paid = paidBySlot + paidByMember;
                         const expected = meta.perMemberInstallment;
                         const remaining = Math.max(0, expected - paid);
                         const statusText =
@@ -1470,7 +1494,7 @@ function AdminChitsPage() {
                               ? "Unpaid"
                               : "Partial";
                         return (
-                          <tr key={memberKey} className="border-t">
+                          <tr key={slot.slotId} className="border-t">
                             <td className="p-2">{name}</td>
                             <td className="p-2">₹{fmt(expected)}</td>
                             <td className="p-2">₹{fmt(paid)}</td>
@@ -1521,16 +1545,67 @@ function AdminChitsPage() {
                   </thead>
                   <tbody>
                     {(() => {
+                      const groupObj = getGroupById(openGroupId);
+                      const slotList = normalizeGroupSlots(groupObj);
+                      if (!slotList.length) {
+                        return (
+                          <tr>
+                            <td className="p-2" colSpan={20}>
+                              No payments data available.
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      const slotsByMember = new Map<string, GroupSlot[]>();
+                      for (const s of slotList) {
+                        if (!slotsByMember.has(s.memberId)) {
+                          slotsByMember.set(s.memberId, []);
+                        }
+                        slotsByMember.get(s.memberId)!.push(s);
+                      }
+                      const preferredSlotIdByMember = new Map<string, string>();
+                      for (const [memberId, memberSlots] of slotsByMember.entries()) {
+                        // Keep legacy member-level payments pinned to the oldest slot.
+                        // This prevents re-shifting history to newly added slots.
+                        const preferred = memberSlots[0]?.slotId;
+                        if (preferred) preferredSlotIdByMember.set(memberId, preferred);
+                      }
+
                       const rowsArr: {
                         memberId: string;
                         name?: string;
                         months: Map<number, number>;
                       }[] = [];
-                      for (const [mid, map] of paymentsMatrix.entries()) {
+                      for (const slot of slotList) {
+                        const mergedMonths = new Map<number, number>();
+                        const slotMonths = paymentsMatrix.get(slot.slotId);
+                        if (slotMonths) {
+                          for (const [m, v] of slotMonths.entries()) {
+                            mergedMonths.set(
+                              m,
+                              (mergedMonths.get(m) ?? 0) + Number(v ?? 0),
+                            );
+                          }
+                        }
+                        if (preferredSlotIdByMember.get(slot.memberId) === slot.slotId) {
+                          const memberMonths = paymentsMatrix.get(slot.memberId);
+                          if (memberMonths) {
+                            for (const [m, v] of memberMonths.entries()) {
+                              mergedMonths.set(
+                                m,
+                                (mergedMonths.get(m) ?? 0) + Number(v ?? 0),
+                              );
+                            }
+                          }
+                        }
                         rowsArr.push({
-                          memberId: mid,
-                          name: memberNamesMap[mid] ?? undefined,
-                          months: map,
+                          memberId: slot.slotId,
+                          name:
+                            memberNamesMap[slot.slotId] ??
+                            memberNamesMap[slot.memberId] ??
+                            undefined,
+                          months: mergedMonths,
                         });
                       }
                       rowsArr.sort((a, b) =>
@@ -1550,9 +1625,7 @@ function AdminChitsPage() {
                         );
                       }
 
-                      const months = buildMonthColumns(
-                        getGroupById(openGroupId),
-                      );
+                      const months = buildMonthColumns(groupObj);
 
                       return rowsArr.map((r) => {
                         const totalPaid = Array.from(
