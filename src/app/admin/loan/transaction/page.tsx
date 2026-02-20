@@ -13,8 +13,8 @@ interface AdminLoanTransaction {
   loanName: string;
   emiMonth: number;
   amount: number;
-  paymentMethod: string;
-  status: string;
+  paymentMethod?: string | null;
+  status?: string | null;
   utr: string;
   date: string;
 }
@@ -69,7 +69,8 @@ export default function AdminLoanTransactionPage() {
   };
 
   const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
+    const normalized = String(status || "").toLowerCase();
+    switch (normalized) {
       case "paid":
         return "bg-green-100 text-green-800";
       case "pending":
@@ -82,15 +83,16 @@ export default function AdminLoanTransactionPage() {
   };
 
   const getStatusLabel = (status: string) => {
-    const s = status.toLowerCase();
+    const s = String(status || "").toLowerCase();
     if (s === "failed") return "Rejected";
     if (s === "paid") return "Approved";
     if (s === "pending") return "Pending";
-    return status;
+    return status || "Unknown";
   };
 
   const getPaymentMethodColor = (method: string) => {
-    switch (method.toLowerCase()) {
+    const normalized = String(method || "").toLowerCase();
+    switch (normalized) {
       case "upi":
         return "bg-blue-100 text-blue-800";
       case "cash":
@@ -219,13 +221,13 @@ export default function AdminLoanTransactionPage() {
                         </span>
                       </td>
                       <td className="py-4 px-3">
-                        <Badge className={getPaymentMethodColor(transaction.paymentMethod)}>
-                          {transaction.paymentMethod}
+                        <Badge className={getPaymentMethodColor(transaction.paymentMethod || "")}>
+                          {transaction.paymentMethod || "UNKNOWN"}
                         </Badge>
                       </td>
                       <td className="py-4 px-3">
-                        <Badge className={getStatusColor(transaction.status)}>
-                          {getStatusLabel(transaction.status)}
+                        <Badge className={getStatusColor(transaction.status || "")}>
+                          {getStatusLabel(transaction.status || "")}
                         </Badge>
                       </td>
                       <td className="py-4 px-3">
@@ -239,7 +241,7 @@ export default function AdminLoanTransactionPage() {
                         </span>
                       </td>
                       <td className="py-4 px-3">
-                        {transaction.status.toLowerCase() === "pending" ? (
+                        {String(transaction.status || "").toLowerCase() === "pending" ? (
                           <div className="flex items-center gap-2">
                             <Button
                               type="button"

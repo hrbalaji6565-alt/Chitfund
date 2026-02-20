@@ -77,7 +77,15 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ success: false, message: "Loan not found" }, { status: 404 });
     }
 
-    const scheduleItem = loan.schedule.find((item: unknown) => {
+    const schedule = Array.isArray(loan.schedule) ? loan.schedule : [];
+    if (!schedule.length) {
+      return NextResponse.json(
+        { success: false, message: "Loan EMI schedule is missing" },
+        { status: 409 }
+      );
+    }
+
+    const scheduleItem = schedule.find((item: unknown) => {
       const rec = item as Record<string, unknown>;
       return Number(rec.monthNumber ?? 0) === monthNumber;
     });
@@ -109,6 +117,12 @@ export async function PATCH(req: Request) {
     }
 
     const dueDate = new Date(scheduleItem.dueDate);
+    if (Number.isNaN(dueDate.getTime())) {
+      return NextResponse.json(
+        { success: false, message: "EMI due date is invalid" },
+        { status: 409 }
+      );
+    }
     const now = new Date();
     dueDate.setHours(0, 0, 0, 0);
     now.setHours(0, 0, 0, 0);
@@ -130,7 +144,7 @@ export async function PATCH(req: Request) {
     scheduleItem.utrNumber = paymentMode === "UPI" ? utrNumber : null;
 
     if (newStatus === "paid") {
-      const nextUnpaid = loan.schedule.find((item: unknown) => {
+      const nextUnpaid = schedule.find((item: unknown) => {
         const rec = item as Record<string, unknown>;
         return String(rec.status ?? "") !== "paid" && Number(rec.monthNumber ?? 0) > monthNumber;
       });

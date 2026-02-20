@@ -15,6 +15,15 @@ function parseCookies(cookieHeader: string | null) {
   return map;
 }
 
+function toIso(value: unknown): string | null {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+  const d = new Date(String(value));
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 export async function GET(req: NextRequest) {
   try {
     const cookieHeader = req.headers.get("cookie") || "";
@@ -67,7 +76,7 @@ export async function GET(req: NextRequest) {
           const paymentDate = (payment as any).approvedAt || (payment as any).createdAt;
           paymentMap.set(key, {
             amount: existing.amount + (allocation.amount || 0),
-            date: existing.date || (paymentDate ? paymentDate.toISOString() : null),
+            date: existing.date || toIso(paymentDate),
           });
         }
       }

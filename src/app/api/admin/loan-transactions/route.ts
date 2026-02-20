@@ -45,12 +45,12 @@ export async function GET(req: Request) {
       _id: transaction._id,
       userName: (transaction.userId as { name?: string })?.name || "Unknown User",
       userIdField: (transaction.userId as { userId?: string })?.userId || "Unknown",
-      loanId: transaction.loanId,
+      loanId: String(transaction.loanId ?? ""),
       loanName: transaction.loanName || `Loan ${transaction.loanId}`,
-      emiMonth: transaction.emiMonth,
-      amount: transaction.amount,
-      paymentMethod: transaction.paymentMethod,
-      status: transaction.status,
+      emiMonth: Number(transaction.emiMonth ?? 0),
+      amount: Number(transaction.amount ?? 0),
+      paymentMethod: transaction.paymentMethod || "UNKNOWN",
+      status: transaction.status || "Unknown",
       utr: transaction.utr || transaction.referenceId || "-",
       date: transaction.createdAt || transaction.transactionDate,
     }));
@@ -119,7 +119,12 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ success: false, message: "Loan not found" }, { status: 404 });
     }
 
-    const scheduleItem = loan.schedule.find((item: unknown) => {
+    const schedule = Array.isArray(loan.schedule) ? loan.schedule : [];
+    if (!schedule.length) {
+      return NextResponse.json({ success: false, message: "Loan EMI schedule is missing" }, { status: 409 });
+    }
+
+    const scheduleItem = schedule.find((item: unknown) => {
       const rec = item as Record<string, unknown>;
       return Number(rec.monthNumber ?? 0) === monthNumber;
     });
@@ -154,7 +159,7 @@ export async function PATCH(req: Request) {
     scheduleItem.utrNumber = tx.paymentMethod === "UPI" ? tx.utr || null : null;
 
     if (newStatus === "paid") {
-      const nextUnpaid = loan.schedule.find((item: unknown) => {
+      const nextUnpaid = schedule.find((item: unknown) => {
         const rec = item as Record<string, unknown>;
         return String(rec.status ?? "") !== "paid" && Number(rec.monthNumber ?? 0) > monthNumber;
       });
