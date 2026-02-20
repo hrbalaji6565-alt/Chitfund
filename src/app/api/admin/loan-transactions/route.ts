@@ -3,13 +3,20 @@ import { verifyToken } from "@/app/lib/jwt";
 import dbConnect from "@/app/lib/mongodb";
 import LoanTransaction from "@/app/models/LoanTransaction";
 import Loan from "@/app/models/loanModel";
+import Member from "@/app/models/Member";
+import mongoose from "mongoose";
 
 function parseCookies(cookieHeader: string | null) {
   const map: Record<string, string> = {};
   if (!cookieHeader) return map;
   cookieHeader.split(";").forEach((c) => {
     const [k, ...v] = c.split("=");
-    map[k.trim()] = decodeURIComponent((v || []).join("=").trim());
+    const raw = (v || []).join("=").trim();
+    try {
+      map[k.trim()] = decodeURIComponent(raw);
+    } catch {
+      map[k.trim()] = raw;
+    }
   });
   return map;
 }
@@ -24,7 +31,12 @@ function getAdminToken(req: Request) {
 function isAdmin(req: Request) {
   const token = getAdminToken(req);
   if (!token) return false;
-  const decoded = verifyToken(token) as { id?: string; role?: string } | null;
+  let decoded: { id?: string; role?: string } | null = null;
+  try {
+    decoded = verifyToken(token) as { id?: string; role?: string } | null;
+  } catch {
+    return false;
+  }
   return Boolean(decoded?.id && decoded?.role === "admin");
 }
 
@@ -37,23 +49,46 @@ export async function GET(req: Request) {
     await dbConnect();
 
     const transactions = await LoanTransaction.find({})
-      .populate("userId", "name userId")
       .sort({ createdAt: -1 })
       .lean();
 
-    const formattedTransactions = transactions.map((transaction) => ({
-      _id: transaction._id,
-      userName: (transaction.userId as { name?: string })?.name || "Unknown User",
-      userIdField: (transaction.userId as { userId?: string })?.userId || "Unknown",
-      loanId: String(transaction.loanId ?? ""),
-      loanName: transaction.loanName || `Loan ${transaction.loanId}`,
-      emiMonth: Number(transaction.emiMonth ?? 0),
-      amount: Number(transaction.amount ?? 0),
-      paymentMethod: transaction.paymentMethod || "UNKNOWN",
-      status: transaction.status || "Unknown",
-      utr: transaction.utr || transaction.referenceId || "-",
-      date: transaction.createdAt || transaction.transactionDate,
-    }));
+    const uniqueUserIds = Array.from(
+      new Set(
+        transactions
+          .map((tx) => String(tx.userId ?? ""))
+          .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      )
+    );
+
+    const members = uniqueUserIds.length
+      ? await Member.find({ _id: { $in: uniqueUserIds } })
+          .select("_id name userId")
+          .lean()
+      : [];
+
+    const memberMap = new Map(
+      members.map((m) => [
+        String((m as unknown as Record<string, unknown>)._id ?? ""),
+        m as unknown as Record<string, unknown>,
+      ])
+    );
+
+    const formattedTransactions = transactions.map((transaction) => {
+      const member = memberMap.get(String(transaction.userId ?? ""));
+      return {
+        _id: transaction._id,
+        userName: String(member?.name ?? "Unknown User"),
+        userIdField: String(member?.userId ?? "Unknown"),
+        loanId: String(transaction.loanId ?? ""),
+        loanName: transaction.loanName || `Loan ${transaction.loanId}`,
+        emiMonth: Number(transaction.emiMonth ?? 0),
+        amount: Number(transaction.amount ?? 0),
+        paymentMethod: transaction.paymentMethod || "UNKNOWN",
+        status: transaction.status || "Unknown",
+        utr: transaction.utr || transaction.referenceId || "-",
+        date: transaction.createdAt || transaction.transactionDate,
+      };
+    });
 
     return NextResponse.json({
       success: true,

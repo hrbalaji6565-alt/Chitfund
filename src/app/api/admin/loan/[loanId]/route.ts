@@ -4,6 +4,7 @@ import dbConnect from "@/app/lib/mongodb";
 import Loan from "@/app/models/loanModel";
 import Payment from "@/app/models/Payment";
 import LoanTransaction from "@/app/models/LoanTransaction";
+import Member from "@/app/models/Member";
 import { verifyToken } from "@/app/lib/jwt";
 import mongoose from "mongoose";
 
@@ -14,7 +15,12 @@ function parseCookies(cookieHeader: string | null) {
   if (!cookieHeader) return map;
   cookieHeader.split(";").forEach((c) => {
     const [k, ...v] = c.split("=");
-    map[k.trim()] = decodeURIComponent((v || []).join("=").trim());
+    const raw = (v || []).join("=").trim();
+    try {
+      map[k.trim()] = decodeURIComponent(raw);
+    } catch {
+      map[k.trim()] = raw;
+    }
   });
   return map;
 }
@@ -69,7 +75,15 @@ function getAdminFromReq(req: NextRequest): { ok: true } | { ok: false; res: Nex
     };
   }
 
-  const decoded: unknown = verifyToken(token);
+  let decoded: unknown = null;
+  try {
+    decoded = verifyToken(token);
+  } catch {
+    return {
+      ok: false,
+      res: NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 }),
+    };
+  }
   if (!decoded || typeof decoded !== "object" || (decoded as { role?: unknown }).role !== "admin") {
     return {
       ok: false,
@@ -92,21 +106,19 @@ export async function GET(req: NextRequest, context: unknown) {
 
     await dbConnect();
 
-    const loan = await Loan.findById(loanId)
-      .populate("userId", "name userId mobile")
-      .lean();
+    const loan = await Loan.findById(loanId).lean();
 
     if (!loan) {
       return NextResponse.json({ success: false, message: "Loan not found" }, { status: 404 });
     }
 
     const loanRec = loan as unknown as UnknownRecord;
-    const memberObj = (loanRec.userId && typeof loanRec.userId === "object")
-      ? (loanRec.userId as UnknownRecord)
-      : null;
-
-    const memberId = memberObj?._id ?? loanRec.userId;
+    const memberId = loanRec.userId;
     const memberIdStr = memberId ? String(memberId) : "";
+    const member = memberIdStr && isValidObjectId(memberIdStr)
+      ? await Member.findById(memberIdStr).select("_id name userId mobile").lean()
+      : null;
+    const memberObj = (member as unknown as UnknownRecord | null) ?? null;
 
     const allPayments = memberIdStr
       ? await Payment.find({

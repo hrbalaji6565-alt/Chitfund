@@ -3,6 +3,8 @@ import type { NextRequest } from "next/server";
 import dbConnect from "@/app/lib/mongodb";
 import { verifyToken } from "@/app/lib/jwt";
 import Loan from "@/app/models/loanModel";
+import Member from "@/app/models/Member";
+import mongoose from "mongoose";
 
 
 function parseCookies(cookieHeader: string | null) {
@@ -10,7 +12,12 @@ function parseCookies(cookieHeader: string | null) {
   if (!cookieHeader) return map;
   cookieHeader.split(";").forEach((c) => {
     const [k, ...v] = c.split("=");
-    map[k.trim()] = decodeURIComponent((v || []).join("=").trim());
+    const raw = (v || []).join("=").trim();
+    try {
+      map[k.trim()] = decodeURIComponent(raw);
+    } catch {
+      map[k.trim()] = raw;
+    }
   });
   return map;
 }
@@ -25,28 +32,47 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
     }
 
-    const decoded = verifyToken(token) as { role?: string } | null;
+    let decoded: { role?: string } | null = null;
+    try {
+      decoded = verifyToken(token) as { role?: string } | null;
+    } catch {
+      return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+    }
     if (!decoded || decoded.role !== "admin") {
       return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
     }
 
     await dbConnect();
 
-    // Fetch all loans with member details - optimized query
     const loans = await Loan.find({})
-      .populate("userId", "name userId mobile")
       .select("userId memberName principal monthlyInterestPercent durationMonths durationType durationValue startDate endDate nextEMIDueDate emiAmount schedule.status createdAt updatedAt")
       .sort({ createdAt: -1 })
       .lean();
 
-    // Format loans for response - only send necessary data
+    const uniqueUserIds = Array.from(
+      new Set(
+        loans
+          .map((loan) => String((loan as unknown as Record<string, unknown>).userId ?? ""))
+          .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      )
+    );
+
+    const members = uniqueUserIds.length
+      ? await Member.find({ _id: { $in: uniqueUserIds } })
+          .select("_id name userId mobile")
+          .lean()
+      : [];
+
+    const memberMap = new Map(
+      members.map((m) => [
+        String((m as unknown as Record<string, unknown>)._id ?? ""),
+        m as unknown as Record<string, unknown>,
+      ])
+    );
+
     const formattedLoans = loans.map((loan) => {
       const loanRec = loan as unknown as Record<string, unknown>;
-      const member =
-        loanRec.userId && typeof loanRec.userId === "object"
-          ? (loanRec.userId as Record<string, unknown>)
-          : {};
-      // Only send status count, not full schedule details
+      const member = memberMap.get(String(loanRec.userId ?? "")) ?? {};
       const schedule = Array.isArray(loanRec.schedule) ? loanRec.schedule : [];
       const scheduleWithStatusOnly = schedule.map((item) => ({
         status:

@@ -177,7 +177,7 @@ const links: SidebarLinkWithChildren[] = [
       </div>
 
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex flex-col justify-between w-64 bg-[var(--bg-card)] border-r border-[var(--border-color)] min-h-screen fixed left-0 top-0">
+      <aside className="hidden lg:flex flex-col justify-between w-64 bg-[var(--bg-card)] border-r border-[var(--border-color)] h-screen overflow-y-auto fixed left-0 top-0">
         <SidebarContent />
       </aside>
 
@@ -191,7 +191,7 @@ const links: SidebarLinkWithChildren[] = [
               exit={{ x: -300 }}
               transition={{ type: "spring", stiffness: 80, damping: 20 }}
               ref={sidebarRef}
-              className="fixed inset-y-0 left-0 z-50 bg-[var(--bg-card)] w-64 shadow-lg flex flex-col justify-between"
+              className="fixed inset-y-0 left-0 z-50 bg-[var(--bg-card)] w-64 shadow-lg flex flex-col justify-between overflow-y-auto"
             >
               <SidebarContent />
             </motion.div>
