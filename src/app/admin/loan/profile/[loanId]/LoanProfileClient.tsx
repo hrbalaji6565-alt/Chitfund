@@ -31,6 +31,7 @@ type Loan = {
   durationType?: "MONTHS" | "DAYS";
   durationValue?: number;
   startDate: string;
+  endDate?: string | null;
   nextEMIDueDate: string | null;
   emiAmount: number;
   schedule: EMIScheduleItem[];
@@ -51,11 +52,36 @@ type CollectModalState = {
   error: string;
 };
 
+type EditLoanForm = {
+  principal: string;
+  monthlyInterestPercent: string;
+  durationType: "MONTHS" | "DAYS";
+  durationValue: string;
+  startDate: string;
+  endDate: string;
+  emiAmount: string;
+};
+
 export default function LoanProfileClient({ loan }: LoanProfileClientProps) {
   const router = useRouter();
   const [deleting, setDeleting] = React.useState(false);
   const [collectingMonth, setCollectingMonth] = React.useState<number | null>(null);
   const [collectModal, setCollectModal] = React.useState<CollectModalState | null>(null);
+  const [showEditModal, setShowEditModal] = React.useState(false);
+  const [savingEdit, setSavingEdit] = React.useState(false);
+  const [editError, setEditError] = React.useState("");
+
+  const [editForm, setEditForm] = React.useState<EditLoanForm>(() => ({
+    principal: String(loan.principal || ""),
+    monthlyInterestPercent: String(loan.monthlyInterestPercent || ""),
+    durationType: (loan.durationType === "DAYS" ? "DAYS" : "MONTHS"),
+    durationValue: String(loan.durationValue || loan.durationMonths || ""),
+    startDate: loan.startDate ? new Date(loan.startDate).toISOString().slice(0, 10) : "",
+    endDate: loan.endDate
+      ? new Date(loan.endDate).toISOString().slice(0, 10)
+      : "",
+    emiAmount: String(loan.emiAmount || ""),
+  }));
 
   const handleDeleteLoan = async () => {
     const ok = window.confirm("Delete this loan? This will also remove linked loan transactions.");
@@ -76,6 +102,68 @@ export default function LoanProfileClient({ loan }: LoanProfileClientProps) {
       alert("Failed to delete loan");
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleEditField = (field: keyof EditLoanForm, value: string) => {
+    setEditError("");
+    setEditForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSaveLoanEdit = async () => {
+    const principal = Number(editForm.principal);
+    const interest = Number(editForm.monthlyInterestPercent);
+    const durationValue = Math.round(Number(editForm.durationValue));
+    const emiAmount = Number(editForm.emiAmount);
+
+    if (!editForm.startDate) {
+      setEditError("Start date is required.");
+      return;
+    }
+    if (!Number.isFinite(principal) || principal <= 0) {
+      setEditError("Principal should be greater than 0.");
+      return;
+    }
+    if (!Number.isFinite(interest) || interest < 0) {
+      setEditError("Interest cannot be negative.");
+      return;
+    }
+    if (!Number.isFinite(durationValue) || durationValue <= 0) {
+      setEditError("Duration should be greater than 0.");
+      return;
+    }
+    if (!Number.isFinite(emiAmount) || emiAmount <= 0) {
+      setEditError("EMI amount should be greater than 0.");
+      return;
+    }
+
+    try {
+      setSavingEdit(true);
+      const res = await fetch(`/api/admin/loan/${encodeURIComponent(loan._id)}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          principal,
+          monthlyInterestPercent: interest,
+          durationType: editForm.durationType,
+          durationValue,
+          startDate: editForm.startDate,
+          endDate: editForm.endDate || undefined,
+          emiAmount,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        setEditError(data?.message || "Failed to update loan");
+        return;
+      }
+      setShowEditModal(false);
+      router.refresh();
+    } catch {
+      setEditError("Failed to update loan");
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -226,6 +314,14 @@ export default function LoanProfileClient({ loan }: LoanProfileClientProps) {
         >
           <ArrowLeft className="w-4 h-4" />
           Back to Loan List
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setShowEditModal(true)}
+          className="flex items-center gap-2"
+        >
+          Edit Loan
         </Button>
         <Button
           type="button"
@@ -462,6 +558,112 @@ export default function LoanProfileClient({ loan }: LoanProfileClientProps) {
                 disabled={collectingMonth === collectModal.emi.monthNumber}
               >
                 {collectingMonth === collectModal.emi.monthNumber ? "Collecting..." : "Collect"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEditModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="w-full max-w-xl rounded-xl bg-white p-5 shadow-xl">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Edit Loan</h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm text-gray-700 block mb-1">Principal</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="0.01"
+                  value={editForm.principal}
+                  onChange={(e) => handleEditField("principal", e.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-gray-700 block mb-1">Monthly Interest %</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={editForm.monthlyInterestPercent}
+                  onChange={(e) => handleEditField("monthlyInterestPercent", e.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-gray-700 block mb-1">Duration Type</label>
+                <select
+                  value={editForm.durationType}
+                  onChange={(e) => handleEditField("durationType", e.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                >
+                  <option value="MONTHS">MONTHS</option>
+                  <option value="DAYS">DAYS</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-sm text-gray-700 block mb-1">
+                  Duration Value ({editForm.durationType === "DAYS" ? "Days" : "Months"})
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={editForm.durationValue}
+                  onChange={(e) => handleEditField("durationValue", e.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-gray-700 block mb-1">Start Date</label>
+                <input
+                  type="date"
+                  value={editForm.startDate}
+                  onChange={(e) => handleEditField("startDate", e.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-gray-700 block mb-1">End Date (optional)</label>
+                <input
+                  type="date"
+                  value={editForm.endDate}
+                  onChange={(e) => handleEditField("endDate", e.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-gray-700 block mb-1">EMI Amount</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="0.01"
+                  value={editForm.emiAmount}
+                  onChange={(e) => handleEditField("emiAmount", e.target.value)}
+                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            {editError ? <p className="text-sm text-red-600 mt-3">{editError}</p> : null}
+
+            <div className="flex justify-end gap-2 mt-5">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={savingEdit}
+                onClick={() => setShowEditModal(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={savingEdit}
+                onClick={() => void handleSaveLoanEdit()}
+              >
+                {savingEdit ? "Saving..." : "Save Loan"}
               </Button>
             </div>
           </div>

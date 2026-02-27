@@ -3,6 +3,11 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import {
+  PAYMENT_ACCOUNT_NUMBER,
+  PAYMENT_IFSC_CODE,
+  PAYMENT_UPI_IDS,
+} from "@/app/lib/paymentConfig";
 
 type Props = { memberId: string; groupId: string };
 
@@ -286,8 +291,9 @@ export default function PaymentWidget({ memberId, groupId }: Props) {
     (group && typeof group.merchantUpi === "string"
       ? group.merchantUpi
       : undefined) ??
-    process.env.NEXT_PUBLIC_DEFAULT_UPI ??
+    PAYMENT_UPI_IDS[0] ??
     "";
+  const upiIdsToShow = [upiId || PAYMENT_UPI_IDS[0], PAYMENT_UPI_IDS[1]].filter(Boolean);
 
   const payeeName =
     (group && typeof group.name === "string"
@@ -562,8 +568,15 @@ export default function PaymentWidget({ memberId, groupId }: Props) {
                 </div>
               )}
               <div className="text-sm">
-                <div className="font-medium">UPI ID</div>
-                <div className="text-xs text-gray-700 mb-2">{upiId}</div>
+                <div className="font-medium">UPI IDs</div>
+                {upiIdsToShow.map((id, idx) => (
+                  <div key={`${id}_${idx}`} className="text-xs text-gray-700">
+                    {idx + 1}. {id}
+                  </div>
+                ))}
+                <div className="font-medium mt-2">Bank Account</div>
+                <div className="text-xs text-gray-700">A/C: {PAYMENT_ACCOUNT_NUMBER}</div>
+                <div className="text-xs text-gray-700 mb-2">IFSC: {PAYMENT_IFSC_CODE}</div>
                 <div className="font-medium">UPI String</div>
                 <div className="text-xs break-all">{upiString}</div>
                 <div className="mt-2 text-xs text-gray-500">

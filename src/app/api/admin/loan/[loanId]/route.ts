@@ -6,6 +6,7 @@ import Payment from "@/app/models/Payment";
 import LoanTransaction from "@/app/models/LoanTransaction";
 import Member from "@/app/models/Member";
 import { verifyToken } from "@/app/lib/jwt";
+import { calculateEndDate, generateEMISchedule } from "@/app/lib/loanUtils";
 import mongoose from "mongoose";
 
 type UnknownRecord = Record<string, unknown>;
@@ -61,6 +62,18 @@ function monthLabelFromDueDate(iso: string | null): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "-";
   return `${d.toLocaleString("en-US", { month: "long" })} ${d.getFullYear()}`;
+}
+
+function toNumber(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function toDateValue(value: unknown): Date | null {
+  if (!value) return null;
+  const d = new Date(String(value));
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
 }
 
 function getAdminFromReq(req: NextRequest): { ok: true } | { ok: false; res: NextResponse } {
@@ -268,6 +281,128 @@ export async function DELETE(req: NextRequest, context: unknown) {
     return NextResponse.json({ success: true, message: "Loan deleted successfully" });
   } catch (err) {
     console.error("DELETE /api/admin/loan/[loanId] error", err);
+    return NextResponse.json({ success: false, message: "Server error" }, { status: 500 });
+  }
+}
+
+export async function PUT(req: NextRequest, context: unknown) {
+  try {
+    const auth = getAdminFromReq(req);
+    if (!auth.ok) return auth.res;
+
+    const { loanId } = await resolveParams(context);
+    if (!isValidObjectId(loanId)) {
+      return NextResponse.json({ success: false, message: "Invalid loan ID" }, { status: 400 });
+    }
+
+    const body = (await req.json().catch(() => ({}))) as UnknownRecord;
+    const principal = toNumber(body.amount ?? body.principal);
+    const monthlyInterestPercent = toNumber(body.monthlyInterestPercent);
+    const durationType = String(body.durationType ?? "MONTHS").toUpperCase() === "DAYS" ? "DAYS" : "MONTHS";
+    const durationValue = Math.max(1, Math.round(toNumber(body.durationValue ?? body.durationMonths)));
+    const emiAmount = toNumber(body.emiAmount);
+    const startDateRaw = String(body.startDate ?? "");
+
+    if (!startDateRaw || !Number.isFinite(principal) || principal <= 0) {
+      return NextResponse.json({ success: false, message: "Valid principal and startDate are required" }, { status: 400 });
+    }
+    if (!Number.isFinite(monthlyInterestPercent) || monthlyInterestPercent < 0) {
+      return NextResponse.json({ success: false, message: "Invalid monthly interest percent" }, { status: 400 });
+    }
+    if (!Number.isFinite(emiAmount) || emiAmount <= 0) {
+      return NextResponse.json({ success: false, message: "Invalid EMI amount" }, { status: 400 });
+    }
+
+    await dbConnect();
+
+    const loanDoc = await Loan.findById(loanId);
+    if (!loanDoc) {
+      return NextResponse.json({ success: false, message: "Loan not found" }, { status: 404 });
+    }
+
+    const startDate = toDateValue(startDateRaw);
+    if (!startDate) {
+      return NextResponse.json({ success: false, message: "Invalid startDate" }, { status: 400 });
+    }
+
+    let endDate: Date | null = null;
+    if (body.endDate) {
+      endDate = toDateValue(body.endDate);
+    }
+    if (!endDate) {
+      const endDateStr = calculateEndDate(
+        startDate.toISOString().split("T")[0],
+        durationType,
+        durationValue,
+      );
+      endDate = toDateValue(endDateStr);
+    }
+    if (!endDate) {
+      return NextResponse.json({ success: false, message: "Invalid endDate" }, { status: 400 });
+    }
+
+    const existingScheduleRaw = Array.isArray(loanDoc.schedule) ? loanDoc.schedule : [];
+    const existingByMonth = new Map<number, UnknownRecord>();
+    for (const item of existingScheduleRaw as unknown[]) {
+      if (!item || typeof item !== "object") continue;
+      const rec = item as UnknownRecord;
+      const monthNumber = Math.max(1, Math.round(toNumber(rec.monthNumber)));
+      existingByMonth.set(monthNumber, rec);
+    }
+
+    const freshSchedule = generateEMISchedule(
+      startDate.toISOString().split("T")[0],
+      durationType,
+      durationValue,
+      emiAmount,
+    );
+
+    const mergedSchedule = freshSchedule.map((row) => {
+      const old = existingByMonth.get(Math.max(1, Math.round(toNumber(row.monthNumber))));
+      const oldPaid = old ? toNumber(old.paidAmount) : 0;
+      const oldPenalty = old ? toNumber(old.penalty) : 0;
+      const oldStatus = old ? String(old.status ?? "pending").toLowerCase() : "pending";
+      const effectiveStatus =
+        oldStatus === "paid" || oldPaid >= toNumber(row.emiAmount) ? "paid" : "pending";
+
+      return {
+        monthNumber: Math.max(1, Math.round(toNumber(row.monthNumber))),
+        emiAmount: toNumber(row.emiAmount),
+        dueDate: toDateValue(row.dueDate) ?? row.dueDate,
+        penalty: oldPenalty > 0 ? oldPenalty : 0,
+        paidAmount: oldPaid > 0 ? oldPaid : 0,
+        status: effectiveStatus,
+        paymentMode: old?.paymentMode ?? null,
+        paymentDate: old?.paymentDate ?? null,
+        transactionId: old?.transactionId ?? null,
+        utrNumber: old?.utrNumber ?? null,
+      };
+    });
+
+    const nextPending = mergedSchedule
+      .filter((item) => String(item.status) !== "paid")
+      .sort((a, b) => new Date(String(a.dueDate)).getTime() - new Date(String(b.dueDate)).getTime())[0];
+
+    loanDoc.principal = principal;
+    loanDoc.monthlyInterestPercent = monthlyInterestPercent;
+    loanDoc.durationType = durationType;
+    loanDoc.durationValue = durationValue;
+    loanDoc.durationMonths = durationType === "MONTHS" ? durationValue : 1;
+    loanDoc.startDate = startDate;
+    loanDoc.endDate = endDate;
+    loanDoc.emiAmount = emiAmount;
+    loanDoc.schedule = mergedSchedule;
+    loanDoc.nextEMIDueDate = nextPending ? new Date(String(nextPending.dueDate)) : null;
+
+    await loanDoc.save();
+
+    return NextResponse.json({
+      success: true,
+      message: "Loan updated successfully",
+      loanId,
+    });
+  } catch (err) {
+    console.error("PUT /api/admin/loan/[loanId] error", err);
     return NextResponse.json({ success: false, message: "Server error" }, { status: 500 });
   }
 }

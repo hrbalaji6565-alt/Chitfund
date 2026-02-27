@@ -19,6 +19,11 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import dynamic from "next/dynamic";
+import {
+  PAYMENT_ACCOUNT_NUMBER,
+  PAYMENT_IFSC_CODE,
+  PAYMENT_UPI_IDS,
+} from "@/app/lib/paymentConfig";
 
 // Dynamically import QR code component to prevent SSR issues
 const QRCodeSVG = dynamic(() => import('react-qr-code'), {
@@ -63,63 +68,29 @@ interface LoanDetails {
 
 // Client-side QR Code component
 const UPIQRCode: React.FC<{ emi: EMI }> = ({ emi }) => {
-  const [mounted, setMounted] = useState(false);
-  const [qrError, setQrError] = useState(false);
+  const upiId = PAYMENT_UPI_IDS[0];
+  const payeeName = "Loan EMI";
+  const amount = emi.emiAmount;
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) {
+  if (!upiId || !amount || amount <= 0) {
     return (
-      <div className="w-[200px] h-[200px] mx-auto bg-gray-100 rounded flex items-center justify-center">
-        <p className="text-sm text-gray-500">Generating UPI QR...</p>
+      <div className="w-[200px] h-[200px] mx-auto bg-yellow-50 rounded flex items-center justify-center">
+        <p className="text-sm text-yellow-600">QR data unavailable</p>
       </div>
     );
   }
 
-  try {
-    const upiId = process.env.NEXT_PUBLIC_DEFAULT_UPI || "7489988065@ibl";
-    const payeeName = "Loan EMI"; // Simplified for QR
-    const amount = emi.emiAmount;
+  const upiString = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payeeName)}&am=${encodeURIComponent(amount.toString())}&cu=INR`;
 
-    // Validate required data
-    if (!upiId || !amount || amount <= 0) {
-      return (
-        <div className="w-[200px] h-[200px] mx-auto bg-yellow-50 rounded flex items-center justify-center">
-          <p className="text-sm text-yellow-600">QR data unavailable</p>
-        </div>
-      );
-    }
-
-    // Generate UPI string in exact format
-    const upiString = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(payeeName)}&am=${encodeURIComponent(amount.toString())}&cu=INR`;
-
-    if (qrError) {
-      return (
-        <div className="w-[200px] h-[200px] mx-auto bg-red-50 rounded flex items-center justify-center">
-          <p className="text-sm text-red-500">QR generation failed</p>
-        </div>
-      );
-    }
-
-    return (
-      <div className="w-[200px] h-[200px] mx-auto bg-white p-2 rounded border">
-        <QRCodeSVG
-          value={upiString}
-          size={184}
-          level="M"
-        />
-      </div>
-    );
-  } catch (error) {
-    console.error("Error in UPIQRCode component:", error);
-    return (
-      <div className="w-[200px] h-[200px] mx-auto bg-red-50 rounded flex items-center justify-center">
-        <p className="text-sm text-red-500">QR Code Error</p>
-      </div>
-    );
-  }
+  return (
+    <div className="w-[200px] h-[200px] mx-auto bg-white p-2 rounded border">
+      <QRCodeSVG
+        value={upiString}
+        size={184}
+        level="M"
+      />
+    </div>
+  );
 };
 
 export default function LoanDetailPage() {
@@ -363,7 +334,7 @@ export default function LoanDetailPage() {
         return "";
       }
       
-      const upiId = process.env.NEXT_PUBLIC_DEFAULT_UPI || "7489988065@ibl";
+      const upiId = PAYMENT_UPI_IDS[0];
       const payeeName = loan.memberName || "Loan EMI";
       const amount = emi.emiAmount;
       
@@ -385,7 +356,7 @@ export default function LoanDetailPage() {
   const canGenerateQR = (emi: EMI) => {
     if (!loan || !emi) return false;
     
-    const upiId = process.env.NEXT_PUBLIC_DEFAULT_UPI || "7489988065@ibl";
+    const upiId = PAYMENT_UPI_IDS[0];
     const payeeName = loan.memberName;
     const amount = emi.emiAmount;
     
@@ -652,7 +623,10 @@ export default function LoanDetailPage() {
                   </div>
                   <div className="text-xs text-gray-600 space-y-1">
                     <p><strong>Amount:</strong> {formatCurrency(showPaymentModal.emiAmount)}</p>
-                    <p><strong>UPI ID:</strong> {process.env.NEXT_PUBLIC_DEFAULT_UPI || "7489988065@ibl"}</p>
+                    <p><strong>UPI ID 1:</strong> {PAYMENT_UPI_IDS[0]}</p>
+                    <p><strong>UPI ID 2:</strong> {PAYMENT_UPI_IDS[1]}</p>
+                    <p><strong>A/C No:</strong> {PAYMENT_ACCOUNT_NUMBER}</p>
+                    <p><strong>IFSC:</strong> {PAYMENT_IFSC_CODE}</p>
                     <p><strong>Payee:</strong> {loan?.memberName || "Loan EMI"}</p>
                   </div>
                 </div>

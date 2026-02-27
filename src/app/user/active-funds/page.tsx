@@ -19,6 +19,11 @@ import type { RootState, AppDispatch } from "@/store/store";
 import type { ChitGroup } from "@/app/lib/types";
 import BidPanel from "@/app/components/BidPanel";
 import { fetchGroups } from "@/store/chitGroupSlice";
+import {
+  PAYMENT_ACCOUNT_NUMBER,
+  PAYMENT_IFSC_CODE,
+  PAYMENT_UPI_IDS,
+} from "@/app/lib/paymentConfig";
 
 /* ---------- helpers & types ---------- */
 
@@ -921,9 +926,10 @@ function PaymentPanel({
         groupObj.upiId ??
           groupObj.merchantUpi ??
           groupObj.upi ??
-          "7489988065@ibl",
+          PAYMENT_UPI_IDS[0],
       )
-    : "7489988065@ibl";
+    : PAYMENT_UPI_IDS[0];
+  const upiIdsToShow = [upiId || PAYMENT_UPI_IDS[0], PAYMENT_UPI_IDS[1]].filter(Boolean);
 
   const payee = isRecord(groupObj)
     ? toStr(
@@ -1383,10 +1389,15 @@ function PaymentPanel({
               )}
             </div>
             <div className="text-xs break-words">
-              <div className="font-medium">UPI ID</div>
-              <div className="mb-2">
-                {upiId || "Not configured"}
-              </div>
+              <div className="font-medium">UPI IDs</div>
+              {upiIdsToShow.map((id, idx) => (
+                <div key={`${id}_${idx}`}>
+                  {idx + 1}. {id}
+                </div>
+              ))}
+              <div className="font-medium mt-2">Bank Account</div>
+              <div>A/C: {PAYMENT_ACCOUNT_NUMBER}</div>
+              <div>IFSC: {PAYMENT_IFSC_CODE}</div>
               <div>{upiPayload}</div>
               <div className="mt-2 text-gray-500">
                 After paying, paste UTR or upload screenshot and press Submit (admin approval required).

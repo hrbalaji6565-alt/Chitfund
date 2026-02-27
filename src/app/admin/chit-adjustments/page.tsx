@@ -32,6 +32,14 @@ type AllocationRow = {
   amount: number;
 };
 
+type SlotProgress = {
+  slotId: string;
+  memberName: string;
+  paidTillMonth: number;
+  nextMonth: number;
+  monthAmounts: Array<{ monthIndex: number; amount: number }>;
+};
+
 const isRecord = (v: unknown): v is UnknownRecord =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -72,6 +80,8 @@ export default function AdminChitAdjustmentsPage() {
   const [slots, setSlots] = useState<SlotOption[]>([]);
   const [selectedSlotIds, setSelectedSlotIds] = useState<string[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
+  const [slotProgress, setSlotProgress] = useState<SlotProgress[]>([]);
+  const [loadingProgress, setLoadingProgress] = useState(false);
 
   const [rows, setRows] = useState<AllocationRow[]>([
     { id: makeRowId(), monthIndex: 1, amount: 0 },
@@ -174,14 +184,92 @@ export default function AdminChitAdjustmentsPage() {
     };
   }, [groupId]);
 
+  const suggestedNextMonth = useMemo(() => {
+    const maxNext = slotProgress.reduce((acc, item) => Math.max(acc, item.nextMonth), 1);
+    const upperBound = selectedGroup?.totalMonths ?? 1;
+    return Math.max(1, Math.min(upperBound, maxNext));
+  }, [slotProgress, selectedGroup]);
+
+  useEffect(() => {
+    if (!groupId || !selectedSlotIds.length) {
+      setSlotProgress([]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadProgress = async () => {
+      setLoadingProgress(true);
+      try {
+        const params = new URLSearchParams({
+          groupId,
+          slotIds: selectedSlotIds.join(","),
+        });
+        const res = await fetch(`/api/collections/member-month-progress?${params.toString()}`, {
+          credentials: "include",
+        });
+        const json = (await res.json().catch(() => ({}))) as UnknownRecord;
+        if (!res.ok) {
+          throw new Error(toStr(json.message || json.error || "Failed to load month progress"));
+        }
+        const rowsRaw = Array.isArray(json.rows) ? json.rows : [];
+        const rows: SlotProgress[] = rowsRaw
+          .filter(isRecord)
+          .map((r) => ({
+            slotId: toStr(r.slotId),
+            memberName: toStr(r.memberName || r.memberId || r.slotId),
+            paidTillMonth: Math.max(0, Math.round(toNum(r.paidTillMonth))),
+            nextMonth: Math.max(1, Math.round(toNum(r.nextMonth))),
+            monthAmounts: (Array.isArray(r.monthAmounts) ? r.monthAmounts : [])
+              .filter(isRecord)
+              .map((x) => ({
+                monthIndex: Math.max(1, Math.round(toNum(x.monthIndex))),
+                amount: Math.max(0, Math.round(toNum(x.amount))),
+              }))
+              .sort((a, b) => a.monthIndex - b.monthIndex),
+          }))
+          .filter((r) => !!r.slotId);
+
+        if (cancelled) return;
+        setSlotProgress(rows);
+        const suggestedFromRows = rows.reduce(
+          (acc, item) => Math.max(acc, item.nextMonth),
+          1,
+        );
+
+        setRows((prev) => {
+          if (prev.length !== 1) return prev;
+          if (prev[0].amount !== 0 || prev[0].monthIndex !== 1) return prev;
+          return [{ ...prev[0], monthIndex: Math.max(1, suggestedFromRows) }];
+        });
+      } catch (err) {
+        if (!cancelled) {
+          setSlotProgress([]);
+          setErrorText(err instanceof Error ? err.message : "Failed to load progress");
+        }
+      } finally {
+        if (!cancelled) setLoadingProgress(false);
+      }
+    };
+
+    void loadProgress();
+    return () => {
+      cancelled = true;
+    };
+  }, [groupId, selectedSlotIds]);
+
   const addRow = () => {
-    setRows((prev) => [...prev, { id: makeRowId(), monthIndex: 1, amount: 0 }]);
+    setRows((prev) => [
+      ...prev,
+      { id: makeRowId(), monthIndex: suggestedNextMonth, amount: 0 },
+    ]);
   };
 
   const removeRow = (id: string) => {
     setRows((prev) => {
       const next = prev.filter((r) => r.id !== id);
-      return next.length ? next : [{ id: makeRowId(), monthIndex: 1, amount: 0 }];
+      return next.length
+        ? next
+        : [{ id: makeRowId(), monthIndex: suggestedNextMonth, amount: 0 }];
     });
   };
 
@@ -396,6 +484,37 @@ export default function AdminChitAdjustmentsPage() {
             <div className="text-xs text-[var(--text-secondary)]">
               Selected slots: {selectedSlotIds.length}
             </div>
+            {selectedSlotIds.length > 0 ? (
+              <div className="text-xs text-[var(--text-secondary)] rounded-md border border-[var(--border-color)] p-2">
+                {loadingProgress ? (
+                  <span>Checking previous month payments...</span>
+                ) : slotProgress.length ? (
+                  <div className="space-y-1">
+                    {slotProgress.map((sp) => (
+                      <div key={sp.slotId}>
+                        <div>
+                          {sp.memberName}: paid till month {sp.paidTillMonth || 0}, next month{" "}
+                          <strong>{sp.nextMonth}</strong>
+                        </div>
+                        {sp.monthAmounts.length ? (
+                          <div className="pl-3">
+                            {sp.monthAmounts.map((m) => (
+                              <div key={`${sp.slotId}_${m.monthIndex}`}>
+                                Month {m.monthIndex}: ₹{m.amount.toLocaleString("en-IN")}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="pl-3">No month-wise payments found yet.</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span>No approved month history found for selected slots.</span>
+                )}
+              </div>
+            ) : null}
           </div>
 
           <div className="space-y-3 rounded-xl border border-[var(--border-color)] p-4">
@@ -415,11 +534,13 @@ export default function AdminChitAdjustmentsPage() {
                     min={1}
                     max={selectedGroup?.totalMonths ?? 1}
                     value={row.monthIndex}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const parsed = Number(e.target.value);
+                      if (!Number.isFinite(parsed)) return;
                       updateRow(row.id, {
-                        monthIndex: Math.max(1, Math.round(toNum(e.target.value))),
-                      })
-                    }
+                        monthIndex: Math.max(1, Math.round(parsed)),
+                      });
+                    }}
                   />
                 </div>
                 <div>
