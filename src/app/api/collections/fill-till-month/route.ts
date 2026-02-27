@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/app/lib/mongodb";
 import Group from "@/app/models/ChitGroup";
 import Payment from "@/app/models/Payment";
+import MemberLedger from "@/app/models/MemberLedger";
+import Member from "@/app/models/Member";
 import { normalizeGroupMemberSlots } from "@/app/lib/groupSlots";
+import mongoose from "mongoose";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -115,6 +118,41 @@ export async function POST(req: NextRequest) {
     );
 
     let createdCount = 0;
+    let updatedLedger = 0;
+    const memberTotals = new Map<string, number>();
+
+    const reconcileLedgerMonth = async (args: {
+      memberId: string;
+      amount: number;
+      month: number; // 1-based
+      paymentId?: string;
+    }) => {
+      const { memberId, amount, month, paymentId } = args;
+      const ledgerMonthIdx = Math.max(0, month - 1);
+
+      const ledger = await MemberLedger.findOne({
+        memberId,
+        groupId,
+        monthIndex: ledgerMonthIdx,
+      });
+
+      if (!ledger) return;
+
+      const paidNow = Number(ledger.paidAmount || 0) + amount;
+      ledger.paidAmount = paidNow;
+      ledger.penaltyAmount = 0;
+      ledger.status =
+        paidNow >= Number(ledger.dueAmount || 0) ? "Paid" : "PartiallyPaid";
+      await ledger.save();
+
+      if (paymentId && mongoose.Types.ObjectId.isValid(paymentId)) {
+        await MemberLedger.findByIdAndUpdate(ledger._id, {
+          $addToSet: { payments: new mongoose.Types.ObjectId(paymentId) },
+        }).catch(() => {});
+      }
+
+      updatedLedger++;
+    };
 
     for (const slot of filteredSlots as SlotRef[]) {
       const memberId = String(slot.memberId);
@@ -136,47 +174,79 @@ export async function POST(req: NextRequest) {
           ],
         };
 
-        const existingPayment = await Payment.findOne(existingQuery).select("_id");
+        const existingPayment = await Payment.findOne(existingQuery).select(
+          "_id amount",
+        ) as { _id?: unknown; amount?: unknown } | null;
 
-        if (!existingPayment) {
-
-          const approvedDate = new Date(startDate);
-          approvedDate.setMonth(startDate.getMonth() + (month - 1));
-
-          const payment = new Payment({
+        if (existingPayment) {
+          await reconcileLedgerMonth({
             memberId,
-            groupId,
+            amount: Math.max(0, toNumber(existingPayment.amount) || monthlyAmount),
+            month,
+            paymentId: existingPayment._id ? String(existingPayment._id) : undefined,
+          });
+          continue;
+        }
+
+        const approvedDate = new Date(startDate);
+        approvedDate.setMonth(startDate.getMonth() + (month - 1));
+
+        const payment = await Payment.create({
+          memberId: new mongoose.Types.ObjectId(memberId),
+          groupId: new mongoose.Types.ObjectId(groupId),
+          memberSlotId,
+          amount: monthlyAmount,
+          type: "CASH",
+          status: "approved",
+          approvedAt: approvedDate,
+          allocated: [
+            {
+              monthIndex: Math.max(0, month - 1),
+              amount: monthlyAmount,
+              penaltyApplied: 0,
+            },
+          ],
+          allocationDetails: [
+            {
+              monthIndex: month,
+              principalPaid: monthlyAmount,
+              penaltyPaid: 0,
+            },
+          ],
+          rawMeta: {
+            collectedVia: "bulk-fill",
+            monthIndex: month,
             memberSlotId,
-            amount: monthlyAmount,
-            type: "CASH",
-            status: "approved",
-            approvedAt: approvedDate,
-            allocated: [
+            allocationDetails: [
               {
-                monthIndex: Math.max(0, month - 1),
-                amount: monthlyAmount,
-                penaltyApplied: 0,
+                monthIndex: month,
+                principalPaid: monthlyAmount,
+                penaltyPaid: 0,
               },
             ],
-            rawMeta: {
-              collectedVia: "bulk-fill",
-              monthIndex: month,
-              memberSlotId,
-              allocationDetails: [
-                {
-                  monthIndex: month,
-                  principalPaid: monthlyAmount,
-                  penaltyPaid: 0,
-                },
-              ],
-              paymentKind: "auto-complete"
-            }
-          });
+            paymentKind: "auto-complete",
+          },
+        });
 
-          await payment.save();
-          createdCount++;
-        }
+        await reconcileLedgerMonth({
+          memberId,
+          amount: monthlyAmount,
+          month,
+          paymentId: payment._id ? String(payment._id) : undefined,
+        });
+
+        memberTotals.set(memberId, (memberTotals.get(memberId) ?? 0) + monthlyAmount);
+        createdCount++;
       }
+    }
+
+    for (const [memberId, total] of memberTotals.entries()) {
+      await Member.findByIdAndUpdate(memberId, {
+        $inc: {
+          totalPaid: total,
+          pendingAmount: -total,
+        },
+      }).catch(() => {});
     }
 
     return NextResponse.json({
@@ -184,6 +254,7 @@ export async function POST(req: NextRequest) {
       message: `Member slots completed till M${targetMonth}`,
       totalCreated: createdCount,
       targetedSlots: filteredSlots.length,
+      updatedLedger,
     });
 
   } catch (error) {
