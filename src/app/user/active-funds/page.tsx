@@ -104,7 +104,6 @@ type OverdueInfo = {
   penaltyIfNow: number;
   details: OverdueDetail[];
   maxPayableIfClearNow: number;
-  currentMonthPenalty: number;
 };
 
 type AllocationItem = {
@@ -198,9 +197,8 @@ function PaymentPanel({
 
   const [auctionDiscountShare, setAuctionDiscountShare] = useState(0);
   const [canPayThisMonth, setCanPayThisMonth] = useState(false);
-  const [auctionDate, setAuctionDate] = useState<string | null>(null);
-  const [auctionMonthIndex, setAuctionMonthIndex] = useState<number | null>(null);
   const [myWinningPayout, setMyWinningPayout] = useState(0);
+  const [manualPenaltyByMonth, setManualPenaltyByMonth] = useState<Map<number, number>>(new Map());
 
   const startDate = isRecord(groupObj) ? toStr(groupObj.startDate ?? "") : "";
 
@@ -214,15 +212,6 @@ function PaymentPanel({
         ),
       )
     : 12;
-
-  const penaltyPercent = isRecord(groupObj)
-    ? toNum(
-        groupObj.penaltyPercent ??
-          groupObj.penalty ??
-          groupObj.penalty_rate ??
-          0,
-      )
-    : 0;
 
   const curMonth = monthsElapsedSinceStart(startDate);
 
@@ -365,6 +354,42 @@ function PaymentPanel({
       alive = false;
     };
   }, [groupObj, memberId, memberSlotId, normalizeAndFilterPayments]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setManualPenaltyByMonth(new Map());
+      if (!isRecord(groupObj) || !memberId) return;
+      const gid = toStr(groupObj._id ?? groupObj.id ?? "");
+      if (!gid) return;
+      try {
+        const url = `/api/collections/penalties?groupId=${encodeURIComponent(
+          gid,
+        )}&memberId=${encodeURIComponent(memberId)}`;
+        const res = await fetch(url, { credentials: "include" });
+        const json: unknown = await res.json().catch(() => ({}));
+        if (!alive || !isRecord(json) || !json.success) return;
+
+        const penaltiesRaw = Array.isArray(json.penalties) ? json.penalties : [];
+        const map = new Map<number, number>();
+        for (const row of penaltiesRaw) {
+          if (!isRecord(row)) continue;
+          const status = toStr(row.status).toLowerCase();
+          if (status === "paid") continue;
+          const monthIndex = Math.max(1, Math.round(toNum(row.monthIndex)));
+          const amount = Math.max(0, Math.round(toNum(row.penaltyAmount)));
+          if (amount <= 0) continue;
+          map.set(monthIndex, amount);
+        }
+        if (alive) setManualPenaltyByMonth(map);
+      } catch {
+        if (alive) setManualPenaltyByMonth(new Map());
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [groupObj, memberId]);
 
   const parseAllocations = (
     raw: AnyObject,
@@ -645,8 +670,6 @@ function PaymentPanel({
     (async () => {
       setAuctionDiscountShare(0);
       setCanPayThisMonth(false);
-      setAuctionDate(null);
-      setAuctionMonthIndex(null);
       setMyWinningPayout(0);
 
       if (!isRecord(groupObj) || !memberId) return;
@@ -755,18 +778,8 @@ function PaymentPanel({
             : curMonth;
 
         if (alive) {
-          setAuctionMonthIndex(normalizedMonth);
           setCanPayThisMonth(normalizedMonth === curMonth);
         }
-
-        const createdAt =
-          typeof auctionRaw.createdAt === "string"
-            ? auctionRaw.createdAt
-            : typeof auctionRaw.date === "string"
-              ? auctionRaw.date
-              : null;
-
-        if (alive) setAuctionDate(createdAt);
       } catch {
         if (alive) {
           setAuctionDiscountShare(0);
@@ -795,22 +808,15 @@ function PaymentPanel({
       penaltyIfNow: 0,
       details: [],
       maxPayableIfClearNow: 0,
-      currentMonthPenalty: 0,
     };
 
     for (let mi = 1; mi < curMonth; mi += 1) {
       const b = monthsSummary[mi - 1];
       const paid = b ? b.paid : 0;
       const rem = Math.max(0, perMember - paid);
-      if (rem > 0) {
+      const penRounded = Math.max(0, manualPenaltyByMonth.get(mi) ?? 0);
+      if (rem > 0 || penRounded > 0) {
         const monthsOver = curMonth - mi;
-        let remWithPenalty = rem;
-        for (let k = 0; k < monthsOver; k += 1) {
-          remWithPenalty *= 1 + penaltyPercent / 100;
-        }
-        const pen = remWithPenalty - rem;
-        const penRounded = Math.round(pen);
-
         info.totalRem += rem;
         info.penaltyIfNow += penRounded;
         info.details.push({
@@ -820,27 +826,6 @@ function PaymentPanel({
           penalty: penRounded,
           totalIfCleared: Math.round(rem + penRounded),
         });
-      }
-    }
-
-    if (
-      auctionMonthIndex === curMonth &&
-      auctionDate &&
-      monthlyRemaining > 0 &&
-      penaltyPercent > 0
-    ) {
-      const aDate = new Date(auctionDate);
-      if (!Number.isNaN(aDate.getTime())) {
-        const now = new Date();
-        const diffMs = now.getTime() - aDate.getTime();
-        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-        if (diffDays > 4) {
-          const pen = Math.round(
-            monthlyRemaining * (penaltyPercent / 100),
-          );
-          info.currentMonthPenalty = pen;
-          info.penaltyIfNow += pen;
-        }
       }
     }
 
@@ -854,10 +839,8 @@ function PaymentPanel({
     monthsSummary,
     perMember,
     curMonth,
-    penaltyPercent,
     monthlyRemaining,
-    auctionMonthIndex,
-    auctionDate,
+    manualPenaltyByMonth,
   ]);
 
   const memberAggregate = useMemo<MemberFundSummary | null>(() => {
@@ -1007,7 +990,7 @@ function PaymentPanel({
     const maxPayNow = overdue.maxPayableIfClearNow;
     if (amount > maxPayNow) {
       setErr(
-        `Max payable now (incl. overdue, current penalty & this month): ₹${maxPayNow}`,
+        `Max payable now (overdue + manual penalty + this month): ₹${maxPayNow}`,
       );
       return;
     }
@@ -1056,11 +1039,10 @@ function PaymentPanel({
 
       if (
         remainingToAllocate > 0 &&
-        (monthlyRemaining > 0 ||
-          overdue.currentMonthPenalty > 0)
+        monthlyRemaining > 0
       ) {
         const totalForMonth = Math.round(
-          monthlyRemaining + overdue.currentMonthPenalty,
+          monthlyRemaining,
         );
         const apply = Math.min(
           remainingToAllocate,
@@ -1069,7 +1051,7 @@ function PaymentPanel({
         allocationSummary.push({
           monthIndex: curMonth,
           due: monthlyRemaining,
-          penalty: overdue.currentMonthPenalty,
+          penalty: 0,
           apply,
         });
         remainingToAllocate -= apply;
@@ -1206,8 +1188,7 @@ function PaymentPanel({
         )}
       </div>
 
-      {(overdue.totalRem > 0 ||
-        overdue.currentMonthPenalty > 0) && (
+      {(overdue.totalRem > 0 || overdue.penaltyIfNow > 0) && (
         <div className="mt-1 p-2 rounded-lg bg-yellow-50 border text-xs space-y-1">
           {overdue.totalRem > 0 && (
             <div>
@@ -1217,18 +1198,9 @@ function PaymentPanel({
               ₹{overdue.totalRem.toLocaleString()}
             </div>
           )}
-          {overdue.currentMonthPenalty > 0 && (
-            <div>
-              <span className="font-medium">
-                Current month penalty (till today):
-              </span>{" "}
-              ₹
-              {overdue.currentMonthPenalty.toLocaleString()}
-            </div>
-          )}
           <div>
             <span className="font-medium">
-              Total penalty:
+              Manual penalty (admin applied):
             </span>{" "}
             ₹{Math.round(
               overdue.penaltyIfNow,
@@ -1236,7 +1208,7 @@ function PaymentPanel({
           </div>
           <div>
             <span className="font-medium">
-              Max payable now (overdue + penalty + this month):
+              Max payable now (overdue + manual penalty + this month):
             </span>{" "}
             ₹{overdue.maxPayableIfClearNow.toLocaleString()}
           </div>
@@ -1318,7 +1290,7 @@ function PaymentPanel({
             inputsDisabled ||
             (monthlyRemaining <= 0 &&
               overdue.totalRem <= 0 &&
-              overdue.currentMonthPenalty <= 0)
+              overdue.penaltyIfNow <= 0)
           }
           className="px-3 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-50"
         >
@@ -1877,14 +1849,6 @@ export default function UserActiveFunds() {
                               {f.pendingAmount.toLocaleString()}
                             </p>
                           </div>
-                          <div>
-                            <p className="text-xs text-gray-500">
-                              Penalty
-                            </p>
-                            <p className="font-semibold">
-                              {f.penaltyPercent}%
-                            </p>
-                          </div>
                         </div>
 
                         <div className="mt-2">
@@ -2074,3 +2038,7 @@ export default function UserActiveFunds() {
     </div>
   );
 }
+
+
+
+

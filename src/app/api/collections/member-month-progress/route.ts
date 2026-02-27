@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/app/lib/mongodb";
 import Group from "@/app/models/ChitGroup";
 import Payment from "@/app/models/Payment";
+import MemberLedger from "@/app/models/MemberLedger";
 import { verifyToken } from "@/app/lib/jwt";
 import { normalizeGroupMemberSlots } from "@/app/lib/groupSlots";
 
@@ -196,6 +197,30 @@ export async function GET(req: NextRequest) {
       maxPaidBySlot.set(slotId, Math.max(maxPaidBySlot.get(slotId) ?? 0, usedMonth));
     }
 
+    const ledgerRows = (await MemberLedger.find({
+      groupId,
+      memberId: { $in: memberIds },
+      penaltyAmount: { $gt: 0 },
+    })
+      .select("memberId monthIndex penaltyAmount status")
+      .lean()) as UnknownRecord[];
+
+    const penaltyByMember = new Map<string, Map<number, number>>();
+    for (const row of ledgerRows) {
+      const memberId = toStr(row.memberId);
+      if (!memberId) continue;
+      const status = toStr(row.status).toLowerCase();
+      if (status === "paid") continue;
+
+      const monthIndex = Math.max(1, Math.round(toNum(row.monthIndex) + 1));
+      const penaltyAmount = Math.max(0, Math.round(toNum(row.penaltyAmount)));
+      if (penaltyAmount <= 0) continue;
+
+      const map = penaltyByMember.get(memberId) ?? new Map<number, number>();
+      map.set(monthIndex, (map.get(monthIndex) ?? 0) + penaltyAmount);
+      penaltyByMember.set(memberId, map);
+    }
+
     const rows = slotIds.map((slotId) => {
       const slotMeta = slotMap.get(slotId);
       const memberId = slotMeta?.memberId ?? "";
@@ -214,6 +239,15 @@ export async function GET(req: NextRequest) {
               amount: Math.round(amount),
             }))
         : [];
+      const memberPenaltyMap = memberId ? penaltyByMember.get(memberId) : undefined;
+      const monthPenalties = memberPenaltyMap
+        ? Array.from(memberPenaltyMap.entries())
+            .sort((a, b) => a[0] - b[0])
+            .map(([monthIndex, penaltyAmount]) => ({
+              monthIndex,
+              penaltyAmount: Math.round(penaltyAmount),
+            }))
+        : [];
 
       return {
         slotId,
@@ -222,6 +256,7 @@ export async function GET(req: NextRequest) {
         paidTillMonth,
         nextMonth,
         monthAmounts,
+        monthPenalties,
       };
     });
 

@@ -117,6 +117,7 @@ export default function PaymentWidget({ memberId, groupId }: Props) {
   const [loading, setLoading] = useState(false);
   const [group, setGroup] = useState<GroupRecord | null>(null);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [manualPenaltyByMonth, setManualPenaltyByMonth] = useState<Map<number, number>>(new Map());
   const [error, setError] = useState<string | null>(null);
 
   const [amountInput, setAmountInput] = useState(""); // string, parsed to number via memo
@@ -138,14 +139,19 @@ export default function PaymentWidget({ memberId, groupId }: Props) {
         const paymentsUrl = `/api/chitgroups/${encodeURIComponent(
           groupId,
         )}/payments?memberId=${encodeURIComponent(memberId)}&all=true`;
+        const penaltiesUrl = `/api/collections/penalties?groupId=${encodeURIComponent(
+          groupId,
+        )}&memberId=${encodeURIComponent(memberId)}`;
 
-        const [gRes, pRes] = await Promise.all([
+        const [gRes, pRes, penRes] = await Promise.all([
           fetch(groupUrl, { credentials: "include" }),
           fetch(paymentsUrl, { credentials: "include" }),
+          fetch(penaltiesUrl, { credentials: "include" }),
         ]);
 
         const gJson: unknown = await gRes.json().catch(() => ({}));
         const pJson: unknown = await pRes.json().catch(() => []);
+        const penJson: unknown = await penRes.json().catch(() => ({}));
 
         if (!mounted) return;
 
@@ -170,6 +176,20 @@ export default function PaymentWidget({ memberId, groupId }: Props) {
           payArr = pJson.data;
         }
         setPayments(payArr.filter(isPaymentRecord));
+
+        const penaltyMap = new Map<number, number>();
+        if (isRecord(penJson) && Array.isArray(penJson.penalties)) {
+          for (const row of penJson.penalties) {
+            if (!isRecord(row)) continue;
+            const status = toStr(row.status).toLowerCase();
+            if (status === "paid") continue;
+            const monthIndex = Math.max(1, Math.round(safeNum(row.monthIndex)));
+            const penaltyAmount = Math.max(0, Math.round(safeNum(row.penaltyAmount)));
+            if (penaltyAmount <= 0) continue;
+            penaltyMap.set(monthIndex, penaltyAmount);
+          }
+        }
+        setManualPenaltyByMonth(penaltyMap);
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -235,7 +255,7 @@ export default function PaymentWidget({ memberId, groupId }: Props) {
     return sum;
   }, [payments, group, currentMonthIndex]);
 
-  // overdue previous months & penalty
+  // overdue previous months + manual penalty (admin applied)
   const overdueInfo = useMemo<OverdueInfo>(() => {
     const res: OverdueInfo = {
       remainingPerMonth: new Map(),
@@ -245,9 +265,6 @@ export default function PaymentWidget({ memberId, groupId }: Props) {
     if (!Array.isArray(payments) || !group) return res;
 
     const per = perMemberInstallment;
-    const penaltyPercent = safeNum(
-      group.penaltyPercent ?? group.penalty ?? group.penalty_rate ?? 0,
-    );
 
     // paid per month
     const paidMap = new Map<number, number>();
@@ -263,14 +280,8 @@ export default function PaymentWidget({ memberId, groupId }: Props) {
     for (let mi = 1; mi < currentMonthIndex; mi += 1) {
       const paid = paidMap.get(mi) ?? 0;
       const remaining = Math.max(0, per - paid);
-      if (remaining <= 0) continue;
-
-      const monthsOverdue = currentMonthIndex - mi;
-      let remWithPenalty = remaining;
-      for (let k = 0; k < monthsOverdue; k += 1) {
-        remWithPenalty *= 1 + penaltyPercent / 100;
-      }
-      const penaltyNow = Math.round(remWithPenalty - remaining);
+      const penaltyNow = Math.max(0, manualPenaltyByMonth.get(mi) ?? 0);
+      if (remaining <= 0 && penaltyNow <= 0) continue;
 
       res.remainingPerMonth.set(mi, remaining);
       res.totalOverdueRemaining += remaining;
@@ -278,7 +289,7 @@ export default function PaymentWidget({ memberId, groupId }: Props) {
     }
 
     return res;
-  }, [payments, group, perMemberInstallment, currentMonthIndex]);
+  }, [payments, group, perMemberInstallment, currentMonthIndex, manualPenaltyByMonth]);
 
   const monthlyRemaining = useMemo(() => {
     const per = perMemberInstallment;
@@ -455,7 +466,7 @@ export default function PaymentWidget({ memberId, groupId }: Props) {
             {overdueInfo.totalOverdueRemaining.toLocaleString()}
           </div>
           <div className="text-xs text-gray-600">
-            Penalty to apply now (approx): ₹
+            Manual penalty (admin applied): ₹
             {Math.round(
               overdueInfo.penaltyToApplyIfPaidNow,
             ).toLocaleString()}
