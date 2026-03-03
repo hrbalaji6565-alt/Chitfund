@@ -89,6 +89,7 @@ type MonthType = {
   details: PaymentDetail[];
   status: string;
   remaining: number;
+  forcePaid?: boolean;
 };
 
 type OverdueDetail = {
@@ -400,44 +401,142 @@ function PaymentPanel({
         penalty: number;
       }[]
     | undefined => {
-    const tryParse = (
+    const shouldShiftAllocated = (
+      allocRaw: unknown,
+      totalMonths?: number,
+    ): boolean => {
+      if (!Array.isArray(allocRaw)) return false;
+      let maxIdx = -1;
+      let minIdx = Number.POSITIVE_INFINITY;
+      for (const item of allocRaw) {
+        if (!isRecord(item)) continue;
+        const m = item.monthIndex;
+        if (typeof m === "number" && m === 0) return true;
+        if (typeof m === "string" && Number(m) === 0) return true;
+        const n = typeof m === "number" ? m : Number(m);
+        if (Number.isFinite(n)) {
+          maxIdx = Math.max(maxIdx, n);
+          minIdx = Math.min(minIdx, n);
+        }
+      }
+      if (minIdx !== Number.POSITIVE_INFINITY && minIdx >= 1) {
+        return false;
+      }
+      if (typeof totalMonths === "number" && totalMonths > 0) {
+        if (maxIdx >= 0 && maxIdx <= totalMonths - 1) return true;
+        if (maxIdx === totalMonths) return false;
+      }
+      return false;
+    };
+
+    const normalizeAllocationMonths = (
+      arr: { monthIndex: number; principal: number; penalty: number }[],
+      shiftOneBased: boolean,
+    ) => {
+      if (!shiftOneBased) return arr;
+      return arr.map((a) => ({
+        ...a,
+        monthIndex: Math.max(1, Math.round((a.monthIndex ?? 0) + 1)),
+      }));
+    };
+
+    const extractAllocationArray = (
       cand: unknown,
     ):
       | {
           monthIndex?: number;
+          idx?: number;
+          month?: number;
+          mindex?: number;
           principal?: unknown;
           penalty?: unknown;
+          principalPaid?: unknown;
+          penaltyPaid?: unknown;
+          penaltyApplied?: unknown;
+          amount?: unknown;
         }[]
       | undefined => {
       if (!cand) return undefined;
       if (Array.isArray(cand) && cand.length) {
         return cand as {
           monthIndex?: number;
+          idx?: number;
+          month?: number;
+          mindex?: number;
           principal?: unknown;
           penalty?: unknown;
+          principalPaid?: unknown;
+          penaltyPaid?: unknown;
+          penaltyApplied?: unknown;
+          amount?: unknown;
         }[];
       }
       if (isRecord(cand)) {
         if (Array.isArray(cand.allocation)) return cand.allocation as {
           monthIndex?: number;
+          idx?: number;
+          month?: number;
+          mindex?: number;
           principal?: unknown;
           penalty?: unknown;
+          principalPaid?: unknown;
+          penaltyPaid?: unknown;
+          penaltyApplied?: unknown;
+          amount?: unknown;
         }[];
         if (Array.isArray(cand.allocated)) return cand.allocated as {
           monthIndex?: number;
+          idx?: number;
+          month?: number;
+          mindex?: number;
           principal?: unknown;
           penalty?: unknown;
+          principalPaid?: unknown;
+          penaltyPaid?: unknown;
+          penaltyApplied?: unknown;
+          amount?: unknown;
         }[];
         if (Array.isArray(cand.allocationSummary)) return cand.allocationSummary as {
           monthIndex?: number;
+          idx?: number;
+          month?: number;
+          mindex?: number;
           principal?: unknown;
           penalty?: unknown;
+          principalPaid?: unknown;
+          penaltyPaid?: unknown;
+          penaltyApplied?: unknown;
+          amount?: unknown;
+        }[];
+        if (Array.isArray(cand.allocationDetails)) return cand.allocationDetails as {
+          monthIndex?: number;
+          idx?: number;
+          month?: number;
+          mindex?: number;
+          principal?: unknown;
+          penalty?: unknown;
+          principalPaid?: unknown;
+          penaltyPaid?: unknown;
+          penaltyApplied?: unknown;
+          amount?: unknown;
+        }[];
+        if (Array.isArray(cand.appliedAllocation)) return cand.appliedAllocation as {
+          monthIndex?: number;
+          idx?: number;
+          month?: number;
+          mindex?: number;
+          principal?: unknown;
+          penalty?: unknown;
+          principalPaid?: unknown;
+          penaltyPaid?: unknown;
+          penaltyApplied?: unknown;
+          amount?: unknown;
         }[];
       }
       if (typeof cand === "string") {
         try {
           const parsed = JSON.parse(cand);
-          return tryParse(parsed);
+          return extractAllocationArray(parsed);
         } catch {
           return undefined;
         }
@@ -445,57 +544,83 @@ function PaymentPanel({
       return undefined;
     };
 
-    const rawMeta = isRecord(raw.rawMeta) ? raw.rawMeta : undefined;
-    const candidates: unknown[] = [
-      raw.allocation,
-      raw.allocated,
-      raw.allocationSummary,
-      rawMeta?.allocation,
-      rawMeta?.allocationSummary,
-      raw.allocationDetails,
-      rawMeta?.allocationDetails,
-    ];
-
-    for (const c of candidates) {
-      const arr = tryParse(c);
-      if (arr && arr.length) {
-        const norm: {
+    const parseAllocationArray = (
+      input: unknown,
+    ):
+      | {
           monthIndex: number;
           principal: number;
           penalty: number;
-        }[] = [];
-        for (const item of arr) {
-          const obj: AnyObject = isRecord(item) ? item : {};
-          let m = obj.monthIndex;
+        }[]
+      | undefined => {
+      const arr = extractAllocationArray(input);
+      if (!arr || !arr.length) return undefined;
 
-          if (typeof m === "number" && m >= 0 && m < 1) m += 1;
+      const out: { monthIndex: number; principal: number; penalty: number }[] = [];
+      for (const item of arr) {
+        const obj: AnyObject = isRecord(item) ? item : {};
+        let m = obj.monthIndex ?? obj.idx ?? obj.month ?? obj.mindex;
 
-          if (m === undefined && typeof raw.monthIndex === "number") {
-            m = raw.monthIndex;
-          }
+        if (typeof m === "number" && m >= 0 && m < 1) m += 1;
 
-          const monthIndex =
-            typeof m === "number" && Number.isFinite(m)
-              ? Math.round(m)
-              : 1;
-
-          const principal = toNum(
-            obj.principalPaid ??
-              obj.principal ??
-              obj.amount ??
-              0,
-          );
-          const penalty = toNum(
-            obj.penaltyPaid ?? obj.penalty ?? 0,
-          );
-
-          norm.push({
-            monthIndex: Math.max(1, monthIndex),
-            principal,
-            penalty,
-          });
+        if (m === undefined && typeof raw.monthIndex === "number") {
+          m = raw.monthIndex;
         }
-        return norm;
+
+        const monthIndex =
+          typeof m === "number" && Number.isFinite(m)
+            ? Math.round(m)
+            : 1;
+
+        const principal = toNum(
+          obj.principalPaid ??
+            obj.principal ??
+            obj.amount ??
+            0,
+        );
+        const penalty = toNum(
+          obj.penaltyPaid ?? obj.penalty ?? obj.penaltyApplied ?? 0,
+        );
+
+        out.push({
+          monthIndex: Math.max(1, monthIndex),
+          principal,
+          penalty,
+        });
+      }
+
+      return out.length ? out : undefined;
+    };
+
+    const rawMeta = isRecord(raw.rawMeta) ? raw.rawMeta : undefined;
+    const shiftAllocatedTop = shouldShiftAllocated(raw.allocated, totalMonthsFromModel);
+    const shiftAllocatedRawMeta = rawMeta
+      ? shouldShiftAllocated(rawMeta.allocated, totalMonthsFromModel)
+      : false;
+
+    const candidates: Array<{ value: unknown; shiftOneBased: boolean }> = [
+      { value: raw.allocationDetails, shiftOneBased: false },
+      { value: raw.allocationSummary, shiftOneBased: false },
+      { value: raw.allocation, shiftOneBased: false },
+      { value: raw.appliedAllocation, shiftOneBased: false },
+    ];
+
+    if (rawMeta) {
+      candidates.push(
+        { value: rawMeta.allocationDetails, shiftOneBased: false },
+        { value: rawMeta.allocationSummary, shiftOneBased: false },
+        { value: rawMeta.allocation, shiftOneBased: false },
+        { value: rawMeta.appliedAllocation, shiftOneBased: false },
+        { value: rawMeta.allocated, shiftOneBased: shiftAllocatedRawMeta },
+      );
+    }
+
+    candidates.push({ value: raw.allocated, shiftOneBased: shiftAllocatedTop });
+
+    for (const c of candidates) {
+      const arr = parseAllocationArray(c.value);
+      if (arr && arr.length) {
+        return normalizeAllocationMonths(arr, c.shiftOneBased);
       }
     }
     return undefined;
@@ -542,6 +667,7 @@ function PaymentPanel({
       principal: number,
       penalty: number,
       meta: PaymentMeta,
+      forcePaid: boolean,
     ) => {
       if (mIdx < 1) mIdx = 1;
       if (mIdx > months.length) mIdx = months.length;
@@ -549,6 +675,7 @@ function PaymentPanel({
       bucket.paid += principal;
       bucket.penalty += penalty;
       bucket.details.push({ principal, penalty, meta });
+      if (forcePaid) bucket.forcePaid = true;
     };
 
     for (const p of payments) {
@@ -571,6 +698,11 @@ function PaymentPanel({
       if (!isApproved) continue;
 
       const allocs = parseAllocations(p);
+      const rawMeta = isRecord(p.rawMeta) ? p.rawMeta : undefined;
+      const isBackfill =
+        toStr(rawMeta?.paymentKind).toLowerCase() === "backfill" ||
+        toStr(rawMeta?.collectedVia).toLowerCase().includes("bulk-fill") ||
+        toStr(rawMeta?.createdFrom).toLowerCase().includes("bulk-fill");
 
       if (allocs && allocs.length) {
         for (const a of allocs) {
@@ -580,7 +712,7 @@ function PaymentPanel({
             ref: toStr(
               p.reference ?? p.txnId ?? p.utr ?? "",
             ),
-          });
+          }, isBackfill);
         }
       } else {
         let monthIndex: number | undefined;
@@ -611,8 +743,14 @@ function PaymentPanel({
         }
 
         const principal = toNum(p.amount ?? p.amt ?? 0);
+        let normalizedMonthIndex =
+          typeof monthIndex === "number" ? monthIndex : curMonth;
+        if (normalizedMonthIndex >= 0 && normalizedMonthIndex < 1) {
+          normalizedMonthIndex += 1;
+        }
+
         addToMonth(
-          typeof monthIndex === "number" ? monthIndex : curMonth,
+          normalizedMonthIndex,
           principal,
           0,
           {
@@ -622,12 +760,13 @@ function PaymentPanel({
               p.reference ?? p.txnId ?? p.utr ?? "",
             ),
           },
+          isBackfill,
         );
       }
     }
 
     for (const m of months) {
-      const expectedForMonth =
+      let expectedForMonth =
         m.idx === curMonth
           ? Math.max(
               0,
@@ -636,6 +775,10 @@ function PaymentPanel({
             )
           : perMember;
 
+      if (m.forcePaid && m.paid > 0) {
+        expectedForMonth = m.paid;
+      }
+
       m.status =
         m.paid >= expectedForMonth
           ? "Paid in full"
@@ -643,10 +786,13 @@ function PaymentPanel({
             ? "Unpaid"
             : "Partial";
 
-      m.remaining = Math.max(
-        0,
-        expectedForMonth - m.paid,
-      );
+      m.remaining =
+        m.forcePaid && m.paid > 0
+          ? 0
+          : Math.max(
+              0,
+              expectedForMonth - m.paid,
+            );
     }
 
     return months;
