@@ -4,6 +4,69 @@ import dbConnect from "@/app/lib/mongodb";
 import Payment from "@/app/models/Payment";
 import Group from "@/app/models/ChitGroup";
 import Member from "@/app/models/Member";
+import { normalizeGroupMemberSlots } from "@/app/lib/groupSlots";
+
+type UnknownRecord = Record<string, unknown>;
+
+const isRecord = (v: unknown): v is UnknownRecord =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+const toNumber = (v: unknown): number => {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const parseAllocationSummary = (input: unknown): Array<{
+  monthIndex?: number;
+  amount?: number;
+  penaltyApplied?: number;
+}> => {
+  let raw: unknown = input;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      raw = undefined;
+    }
+  }
+
+  let sourceArray: unknown[] | null = null;
+  if (Array.isArray(raw)) {
+    sourceArray = raw;
+  } else if (isRecord(raw)) {
+    const maybe = raw.allocation ?? raw.alloc ?? raw.allocationSummary;
+    if (Array.isArray(maybe)) sourceArray = maybe;
+  }
+
+  if (!sourceArray) return [];
+
+  return sourceArray
+    .map((it) => {
+      if (!isRecord(it)) return null;
+      const monthIndex = toNumber(it.monthIndex);
+      const amount =
+        typeof it.amount === "number"
+          ? it.amount
+          : typeof it.principalPaid === "number"
+            ? it.principalPaid
+            : typeof it.apply === "number"
+              ? it.apply
+              : undefined;
+      const penaltyApplied =
+        typeof it.penaltyApplied === "number"
+          ? it.penaltyApplied
+          : typeof it.penaltyPaid === "number"
+            ? it.penaltyPaid
+            : 0;
+      return {
+        monthIndex: Number.isFinite(monthIndex) ? Math.round(monthIndex) : undefined,
+        amount: Number.isFinite(Number(amount)) ? Number(amount) : undefined,
+        penaltyApplied: Number.isFinite(Number(penaltyApplied)) ? Number(penaltyApplied) : 0,
+      };
+    })
+    .filter((x): x is { monthIndex?: number; amount?: number; penaltyApplied?: number } => x !== null);
+};
 
 export async function GET(req: NextRequest) {
   try {
@@ -183,6 +246,85 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, payment });
   } catch (err) {
     console.error("POST /api/admin/transactions error:", err);
+    return NextResponse.json({ success: false, error: (err as Error).message }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    await dbConnect();
+    const body = (await req.json().catch(() => ({}))) as UnknownRecord;
+    const paymentId = String(body.paymentId ?? "");
+    const amountRaw = body.amount;
+    const memberSlotIdRaw = body.memberSlotId ?? body.slotId;
+    const referenceRaw = body.reference ?? body.utr ?? body.txn ?? body.txnid;
+    const adminNote = typeof body.adminNote === "string" ? body.adminNote : undefined;
+    const allocationSummaryRaw = body.allocationSummary ?? body.rawMeta;
+
+    if (!paymentId) {
+      return NextResponse.json({ success: false, error: "paymentId required" }, { status: 400 });
+    }
+
+    const payment = await Payment.findById(paymentId);
+    if (!payment) {
+      return NextResponse.json({ success: false, error: "Payment not found" }, { status: 404 });
+    }
+    if (payment.status !== "pending") {
+      return NextResponse.json({ success: false, error: "Only pending payments can be edited" }, { status: 400 });
+    }
+
+    if (amountRaw !== undefined) {
+      const amount = Number(amountRaw);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return NextResponse.json({ success: false, error: "Invalid amount" }, { status: 400 });
+      }
+      payment.amount = amount;
+    }
+
+    if (memberSlotIdRaw !== undefined) {
+      const memberSlotId = String(memberSlotIdRaw ?? "");
+      if (!memberSlotId) {
+        payment.memberSlotId = undefined;
+      } else {
+        const groupDoc = await Group.findById(payment.groupId).lean();
+        const slots = normalizeGroupMemberSlots((groupDoc as UnknownRecord | null)?.members);
+        const slotAllowed = slots.some(
+          (s) => String(s.slotId) === memberSlotId && String(s.memberId) === String(payment.memberId),
+        );
+        if (!slotAllowed) {
+          return NextResponse.json({ success: false, error: "Invalid member slot for this group/member" }, { status: 400 });
+        }
+        payment.memberSlotId = memberSlotId;
+      }
+    }
+
+    if (referenceRaw !== undefined) {
+      const ref = String(referenceRaw ?? "");
+      payment.reference = ref || undefined;
+      payment.utr = ref || undefined;
+    }
+    if (adminNote !== undefined) {
+      payment.adminNote = adminNote;
+    }
+
+    if (allocationSummaryRaw !== undefined) {
+      const allocated = parseAllocationSummary(allocationSummaryRaw);
+      if (!allocated.length) {
+        return NextResponse.json({ success: false, error: "Invalid allocationSummary" }, { status: 400 });
+      }
+      payment.allocated = allocated.map((a) => ({
+        monthIndex: a.monthIndex,
+        amount: a.amount,
+        penaltyApplied: a.penaltyApplied ?? 0,
+      }));
+      const rawMeta = (payment.rawMeta && isRecord(payment.rawMeta)) ? payment.rawMeta : {};
+      payment.rawMeta = { ...rawMeta, allocationSummary: allocated };
+    }
+
+    await payment.save();
+    return NextResponse.json({ success: true, payment });
+  } catch (err) {
+    console.error("PATCH /api/admin/transactions error:", err);
     return NextResponse.json({ success: false, error: (err as Error).message }, { status: 500 });
   }
 }

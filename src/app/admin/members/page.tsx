@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Plus,
   Edit,
@@ -23,8 +24,9 @@ import { Badge } from "@/app/components/ui/badge";
 import { useSelector, useDispatch } from "react-redux";
 import type { RootState, AppDispatch } from "@/store/store";
 import { fetchMembers, createMember, updateMember, deleteMember } from "@/store/memberSlice";
-import { fetchGroups } from "@/store/chitGroupSlice";
+import { fetchGroups, updateGroup } from "@/store/chitGroupSlice";
 import type { Member } from "@/app/lib/types"; // server-side Member type
+import { normalizeGroupMemberSlots } from "@/app/lib/groupSlots";
 
 // Local subscriber shape used for UI form / previews
 interface SubscriberLocal {
@@ -78,10 +80,37 @@ function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null && !Array.isArray(x);
 }
 
+type UnknownRecord = Record<string, unknown>;
+
 function toString(val: unknown): string | undefined {
   if (typeof val === "string") return val;
   if (typeof val === "number") return String(val);
   return undefined;
+}
+
+function toNum(val: unknown, fallback = 0): number {
+  const n = Number(val);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function toStr(val: unknown): string {
+  if (val === undefined || val === null) return "";
+  return String(val);
+}
+
+function getIdFromUnknown(val: unknown): string {
+  if (typeof val === "string" || typeof val === "number") return String(val);
+  if (isRecord(val)) {
+    return toStr(val._id ?? val.id);
+  }
+  return "";
+}
+
+function formatINR(val: number): string {
+  return Number(val || 0).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function normalizeGroupsFromMember(m: unknown): string[] {
@@ -122,12 +151,18 @@ function normalizeGroupNamesFromMember(m: unknown): string[] {
   return [];
 }
 
+type GroupSlot = { memberId: string; slotId: string };
+
+function getGroupSlots(groupMembers: unknown): GroupSlot[] {
+  return normalizeGroupMemberSlots(groupMembers);
+}
+
 export default function SubscribersPage() {
   const dispatch = useDispatch<AppDispatch>();
   const members = useSelector((s: RootState) => s.members.members) as Member[]; // server members
   const memberStatus = useSelector((s: RootState) => s.members.status);
 
-  const groups = useSelector((s: RootState) => s.chitGroups.groups) as { _id: string; name: string }[];
+  const groups = useSelector((s: RootState) => s.chitGroups.groups) as Array<{ _id?: string; name?: string; [k: string]: unknown }>;
   const groupsStatus = useSelector((s: RootState) => s.chitGroups.status);
 
   // UI states
@@ -174,6 +209,44 @@ export default function SubscribersPage() {
   }>>([]);
   const [emiLoading, setEmiLoading] = useState(false);
   const [emiError, setEmiError] = useState<string | null>(null);
+
+  const [memberPayments, setMemberPayments] = useState<UnknownRecord[]>([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+  const [paymentsError, setPaymentsError] = useState<string | null>(null);
+
+  const [loanTxns, setLoanTxns] = useState<UnknownRecord[]>([]);
+  const [loanLoading, setLoanLoading] = useState(false);
+  const [loanError, setLoanError] = useState<string | null>(null);
+
+  const [groupProgress, setGroupProgress] = useState<Record<string, { totalMonths: number; rows: Array<{
+    slotId: string;
+    memberId: string;
+    memberName: string;
+    paidTillMonth: number;
+    nextMonth: number;
+    monthAmounts: Array<{ monthIndex: number; amount: number }>;
+    monthPenalties: Array<{ monthIndex: number; penaltyAmount: number }>;
+  }> }>>({});
+
+  const [paymentForm, setPaymentForm] = useState({
+    groupId: "",
+    slotId: "",
+    monthIndex: "",
+    amount: "",
+    utr: "",
+    note: "",
+  });
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const [selectedGroupToAdd, setSelectedGroupToAdd] = useState<string>("");
+  const [editPayment, setEditPayment] = useState<{
+    paymentId: string;
+    groupId: string;
+    slotId: string;
+    monthIndex: string;
+    amount: string;
+    utr: string;
+    note: string;
+  } | null>(null);
 
   // fetch members & groups on mount
   useEffect(() => {
@@ -374,13 +447,289 @@ export default function SubscribersPage() {
     }
   };
 
+  const refreshMemberPayments = async (memberId: string) => {
+    if (!memberId) return;
+    setPaymentsLoading(true);
+    setPaymentsError(null);
+    try {
+      const res = await fetch(`/api/admin/transactions?memberId=${encodeURIComponent(memberId)}&status=all`, {
+        credentials: "include",
+      });
+      const data = (await res.json()) as UnknownRecord;
+      if (!res.ok || data.success === false) {
+        throw new Error(String(data.error ?? data.message ?? "Failed to load payments"));
+      }
+      const rows = Array.isArray(data.payments) ? data.payments : [];
+      setMemberPayments(rows);
+    } catch (err) {
+      setPaymentsError(String(err));
+      setMemberPayments([]);
+    } finally {
+      setPaymentsLoading(false);
+    }
+  };
+
+  const refreshLoanTransactions = async (memberId: string) => {
+    if (!memberId) return;
+    setLoanLoading(true);
+    setLoanError(null);
+    try {
+      const res = await fetch(`/api/admin/loan-transactions?memberId=${encodeURIComponent(memberId)}`, {
+        credentials: "include",
+      });
+      const data = (await res.json()) as UnknownRecord;
+      if (!res.ok || data.success === false) {
+        throw new Error(String(data.message ?? "Failed to load loan transactions"));
+      }
+      const rows = Array.isArray(data.transactions) ? data.transactions : [];
+      setLoanTxns(rows);
+    } catch (err) {
+      setLoanError(String(err));
+      setLoanTxns([]);
+    } finally {
+      setLoanLoading(false);
+    }
+  };
+
+  const refreshGroupProgress = async (memberId: string) => {
+    if (!memberId) return;
+    const map: Record<string, { totalMonths: number; rows: Array<{
+      slotId: string;
+      memberId: string;
+      memberName: string;
+      paidTillMonth: number;
+      nextMonth: number;
+      monthAmounts: Array<{ monthIndex: number; amount: number }>;
+      monthPenalties: Array<{ monthIndex: number; penaltyAmount: number }>;
+    }> }> = {};
+
+    const groupsWithSlots = (groups || [])
+      .map((g) => {
+        const slots = getGroupSlots((g as UnknownRecord).members).filter((s) => s.memberId === memberId);
+        return slots.length ? { group: g, slots } : null;
+      })
+      .filter(Boolean) as Array<{ group: { _id?: string }; slots: GroupSlot[] }>;
+
+    if (!groupsWithSlots.length) {
+      setGroupProgress({});
+      return;
+    }
+
+    await Promise.all(
+      groupsWithSlots.map(async ({ group, slots }) => {
+        const groupId = String(group._id ?? "");
+        if (!groupId) return;
+        const slotIds = slots.map((s) => s.slotId).filter(Boolean);
+        if (!slotIds.length) return;
+        try {
+          const res = await fetch(
+            `/api/collections/member-month-progress?groupId=${encodeURIComponent(groupId)}&slotIds=${encodeURIComponent(slotIds.join(","))}`,
+            { credentials: "include" },
+          );
+          const data = (await res.json()) as UnknownRecord;
+          if (res.ok && data.success) {
+            map[groupId] = {
+              totalMonths: toNum(data.totalMonths, 0),
+              rows: Array.isArray(data.rows) ? (data.rows as Array<{
+                slotId: string;
+                memberId: string;
+                memberName: string;
+                paidTillMonth: number;
+                nextMonth: number;
+                monthAmounts: Array<{ monthIndex: number; amount: number }>;
+                monthPenalties: Array<{ monthIndex: number; penaltyAmount: number }>;
+              }>) : [],
+            };
+          }
+        } catch (err) {
+          console.warn("Failed to load member month progress", err);
+        }
+      }),
+    );
+
+    setGroupProgress(map);
+  };
+
+  const addSlotToGroup = async (groupId: string, memberId: string) => {
+    if (!groupId || !memberId) return;
+    const group = groups.find((g) => String((g as UnknownRecord)._id ?? "") === groupId);
+    if (!group) return;
+    try {
+      const currentSlots = getGroupSlots((group as UnknownRecord).members);
+      const updated = [
+        ...currentSlots.map((s) => ({ memberId: s.memberId, slotId: s.slotId })),
+        { memberId },
+      ];
+      await dispatch(updateGroup({ id: groupId, updates: { members: updated } })).unwrap();
+      await dispatch(fetchGroups());
+      await dispatch(fetchMembers());
+      await refreshGroupProgress(memberId);
+    } catch (err) {
+      console.error("Failed to add slot:", err);
+    }
+  };
+
+  const removeSlotFromGroup = async (groupId: string, slotId: string, memberId: string) => {
+    if (!groupId || !slotId) return;
+    const group = groups.find((g) => String((g as UnknownRecord)._id ?? "") === groupId);
+    if (!group) return;
+    try {
+      const currentSlots = getGroupSlots((group as UnknownRecord).members);
+      const updated = currentSlots
+        .filter((s) => s.slotId !== slotId)
+        .map((s) => ({ memberId: s.memberId, slotId: s.slotId }));
+      await dispatch(updateGroup({ id: groupId, updates: { members: updated } })).unwrap();
+      await dispatch(fetchGroups());
+      await dispatch(fetchMembers());
+      await refreshGroupProgress(memberId);
+    } catch (err) {
+      console.error("Failed to remove slot:", err);
+    }
+  };
+
+  const addMemberToSelectedGroup = async (memberId: string) => {
+    if (!selectedGroupToAdd || !memberId) return;
+    await addSlotToGroup(selectedGroupToAdd, memberId);
+    setSelectedGroupToAdd("");
+  };
+
+  const submitPayment = async (memberId: string) => {
+    if (!memberId || !paymentForm.groupId || !paymentForm.amount || !paymentForm.monthIndex) return;
+    if (!paymentForm.slotId) {
+      setToastMsg({ text: "Please select a slot for this payment.", type: "error" });
+      return;
+    }
+    setPaymentSubmitting(true);
+    try {
+      const monthIndexNum = Number(paymentForm.monthIndex);
+      const amountNum = Number(paymentForm.amount);
+      const payload = {
+        memberId,
+        memberSlotId: paymentForm.slotId || undefined,
+        amount: paymentForm.amount,
+        utr: paymentForm.utr || undefined,
+        adminNote: paymentForm.note || undefined,
+        allocationSummary: JSON.stringify([
+          {
+            monthIndex: Math.max(0, Math.round(monthIndexNum) - 1),
+            amount: Number.isFinite(amountNum) ? amountNum : 0,
+          },
+        ]),
+      };
+      const res = await fetch(`/api/chitgroups/${encodeURIComponent(paymentForm.groupId)}/payments/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+      });
+      const data = (await res.json()) as UnknownRecord;
+      if (!res.ok || data.success === false) {
+        throw new Error(String(data.error ?? "Failed to create payment"));
+      }
+      setPaymentForm({ groupId: "", slotId: "", monthIndex: "", amount: "", utr: "", note: "" });
+      await refreshMemberPayments(memberId);
+      await refreshGroupProgress(memberId);
+      setToastMsg({ text: "Payment request created", type: "success" });
+    } catch (err) {
+      setToastMsg({ text: String(err), type: "error" });
+    } finally {
+      setPaymentSubmitting(false);
+    }
+  };
+
+  const approvePayment = async (paymentId: string) => {
+    try {
+      const res = await fetch("/api/admin/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId, approve: true }),
+        credentials: "include",
+      });
+      const data = (await res.json()) as UnknownRecord;
+      if (!res.ok || data.success === false) {
+        throw new Error(String(data.error ?? "Failed to approve payment"));
+      }
+      if (viewingSubscriber?._id) {
+        await refreshMemberPayments(viewingSubscriber._id);
+        await refreshGroupProgress(viewingSubscriber._id);
+      }
+    } catch (err) {
+      setToastMsg({ text: String(err), type: "error" });
+    }
+  };
+
+  const rejectPayment = async (paymentId: string) => {
+    try {
+      const res = await fetch("/api/admin/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId, approve: false, adminNote: "Rejected by admin" }),
+        credentials: "include",
+      });
+      const data = (await res.json()) as UnknownRecord;
+      if (!res.ok || data.success === false) {
+        throw new Error(String(data.error ?? "Failed to reject payment"));
+      }
+      if (viewingSubscriber?._id) {
+        await refreshMemberPayments(viewingSubscriber._id);
+        await refreshGroupProgress(viewingSubscriber._id);
+      }
+    } catch (err) {
+      setToastMsg({ text: String(err), type: "error" });
+    }
+  };
+
+  const deletePayment = async (paymentId: string) => {
+    if (typeof window !== "undefined" && !window.confirm("Delete this payment? This cannot be undone.")) return;
+    try {
+      const res = await fetch("/api/admin/transactions", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId }),
+        credentials: "include",
+      });
+      const data = (await res.json()) as UnknownRecord;
+      if (!res.ok || data.success === false) {
+        throw new Error(String(data.error ?? "Failed to delete payment"));
+      }
+      if (viewingSubscriber?._id) {
+        await refreshMemberPayments(viewingSubscriber._id);
+        await refreshGroupProgress(viewingSubscriber._id);
+      }
+    } catch (err) {
+      setToastMsg({ text: String(err), type: "error" });
+    }
+  };
+
+  const updateLoanTransaction = async (transactionId: string, action: "approve" | "reject") => {
+    try {
+      const res = await fetch("/api/admin/loan-transactions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transactionId, action }),
+        credentials: "include",
+      });
+      const data = (await res.json()) as UnknownRecord;
+      if (!res.ok || data.success === false) {
+        throw new Error(String(data.message ?? "Failed to update loan transaction"));
+      }
+      if (viewingSubscriber?._id) {
+        await refreshLoanTransactions(viewingSubscriber._id);
+      }
+    } catch (err) {
+      setToastMsg({ text: String(err), type: "error" });
+    }
+  };
+
   // VIEW (open view modal with full images and details)
   const handleView = async (s: SubscriberLocal) => {
     setViewingSubscriber(s);
     setViewOpen(true);
     setEmiSchedule([]);
     setEmiError(null);
-    
+    setSelectedGroupToAdd("");
+    setPaymentForm({ groupId: "", slotId: "", monthIndex: "", amount: "", utr: "", note: "" });
+
     // Fetch EMI schedule for this member
     if (s._id) {
       setEmiLoading(true);
@@ -406,6 +755,16 @@ export default function SubscribersPage() {
       setEmiSchedule([]);
       setEmiError(null);
     }
+
+    if (s._id) {
+      void refreshMemberPayments(s._id);
+      void refreshLoanTransactions(s._id);
+      void refreshGroupProgress(s._id);
+    } else {
+      setMemberPayments([]);
+      setLoanTxns([]);
+      setGroupProgress({});
+    }
   };
 
   // helper to show either uploaded base64 preview or server URL
@@ -423,12 +782,160 @@ export default function SubscribersPage() {
   };
 
   const fieldConfig = [
-  { label: "Full Name", key: "name", type: "text", placeholder: "John Doe" },
-  { label: "User ID", key: "userId", type: "text", placeholder: "john123" }, // ✅
-  { label: "Password", key: "password", type: "password", placeholder: "********" },
-  { label: "Mobile Number", key: "mobile", type: "text", placeholder: "+91 9876543210" },
-  { label: "Joining Date", key: "joiningDate", type: "date", placeholder: "" },
-];
+    { label: "Full Name", key: "name", type: "text", placeholder: "John Doe" },
+    { label: "User ID", key: "userId", type: "text", placeholder: "john123" },
+    { label: "Password", key: "password", type: "password", placeholder: "********" },
+    { label: "Mobile Number", key: "mobile", type: "text", placeholder: "+91 9876543210" },
+    { label: "Joining Date", key: "joiningDate", type: "date", placeholder: "" },
+  ];
+
+  const memberGroupInfo = useMemo(() => {
+    if (!viewingSubscriber?._id) return [];
+    const memberId = viewingSubscriber._id;
+    return (groups || [])
+      .map((g) => {
+        const slots = getGroupSlots((g as UnknownRecord).members).filter((s) => s.memberId === memberId);
+        if (!slots.length) return null;
+        return { group: g as UnknownRecord, slots };
+      })
+      .filter(Boolean) as Array<{ group: UnknownRecord; slots: GroupSlot[] }>;
+  }, [groups, viewingSubscriber?._id]);
+
+  const availableGroupsForMember = useMemo(() => {
+    if (!viewingSubscriber?._id) return [];
+    const memberId = viewingSubscriber._id;
+    return (groups || [])
+      .filter((g) => {
+        const slots = getGroupSlots((g as UnknownRecord).members).filter((s) => s.memberId === memberId);
+        return slots.length === 0;
+      })
+      .map((g) => g as UnknownRecord);
+  }, [groups, viewingSubscriber?._id]);
+
+  const approvedPayments = useMemo(() => {
+    const rows = memberPayments.filter((p) => String(p.status ?? "") === "approved");
+    return rows;
+  }, [memberPayments]);
+
+  const selectedPaymentGroup = useMemo(() => {
+    if (!paymentForm.groupId) return null;
+    return (memberGroupInfo || []).find((g) => String((g.group as UnknownRecord)?._id ?? "") === paymentForm.groupId) ?? null;
+  }, [memberGroupInfo, paymentForm.groupId]);
+
+  const selectedPaymentSlotRow = useMemo(() => {
+    if (!paymentForm.groupId || !paymentForm.slotId) return null;
+    const progress = groupProgress[paymentForm.groupId];
+    return progress?.rows?.find((r) => r.slotId === paymentForm.slotId) ?? null;
+  }, [groupProgress, paymentForm.groupId, paymentForm.slotId]);
+
+  const selectedPaymentTotalMonths = useMemo(() => {
+    if (!paymentForm.groupId) return 0;
+    const progress = groupProgress[paymentForm.groupId];
+    const totalFromProgress = progress?.totalMonths ?? 0;
+    if (totalFromProgress) return totalFromProgress;
+    const fromGroup = selectedPaymentGroup?.group ? toNum((selectedPaymentGroup.group as UnknownRecord).totalMonths, 0) : 0;
+    return fromGroup;
+  }, [groupProgress, paymentForm.groupId, selectedPaymentGroup]);
+
+  const paymentMonthOptions = useMemo(() => {
+    if (!selectedPaymentTotalMonths || selectedPaymentTotalMonths <= 0) return [];
+    return Array.from({ length: selectedPaymentTotalMonths }, (_, i) => i + 1);
+  }, [selectedPaymentTotalMonths]);
+
+  useEffect(() => {
+    if (!paymentForm.groupId || !paymentForm.slotId) return;
+    if (paymentForm.monthIndex) return;
+    const suggested = selectedPaymentSlotRow?.nextMonth ?? 1;
+    setPaymentForm((prev) => ({ ...prev, monthIndex: String(suggested) }));
+  }, [paymentForm.groupId, paymentForm.slotId, paymentForm.monthIndex, selectedPaymentSlotRow?.nextMonth]);
+
+  const editPaymentTotalMonths = useMemo(() => {
+    if (!editPayment?.groupId) return 0;
+    const progress = groupProgress[editPayment.groupId];
+    const totalFromProgress = progress?.totalMonths ?? 0;
+    if (totalFromProgress) return totalFromProgress;
+    const group = groups.find((g) => String((g as UnknownRecord)._id ?? "") === editPayment.groupId) as UnknownRecord | undefined;
+    return group ? toNum(group.totalMonths, 0) : 0;
+  }, [editPayment?.groupId, groupProgress, groups]);
+
+  const editPaymentSlotRow = useMemo(() => {
+    if (!editPayment?.groupId || !editPayment?.slotId) return null;
+    const progress = groupProgress[editPayment.groupId];
+    return progress?.rows?.find((r) => r.slotId === editPayment.slotId) ?? null;
+  }, [editPayment?.groupId, editPayment?.slotId, groupProgress]);
+
+  const getPaymentMonthIndex = (payment: UnknownRecord): number => {
+    const rawMeta = isRecord(payment.rawMeta) ? payment.rawMeta : {};
+    const rawMonth = toNum(rawMeta.monthIndex, 0);
+    if (rawMonth > 0) return Math.round(rawMonth);
+    const allocated = Array.isArray(payment.allocated) ? payment.allocated : [];
+    let maxMonth = 0;
+    for (const row of allocated) {
+      if (!isRecord(row)) continue;
+      const m = toNum(row.monthIndex, -1);
+      if (m >= 0) maxMonth = Math.max(maxMonth, Math.round(m + 1));
+    }
+    return maxMonth;
+  };
+
+  const openEditPayment = (p: UnknownRecord) => {
+    const paymentId = String(p._id ?? "");
+    const groupId = getIdFromUnknown(p.groupId);
+    const slotId = String(p.memberSlotId ?? "");
+    const monthIndex = getPaymentMonthIndex(p);
+    setEditPayment({
+      paymentId,
+      groupId,
+      slotId,
+      monthIndex: monthIndex > 0 ? String(monthIndex) : "",
+      amount: String(p.amount ?? ""),
+      utr: String(p.utr ?? p.reference ?? ""),
+      note: String(p.adminNote ?? ""),
+    });
+  };
+
+  const updatePayment = async () => {
+    if (!editPayment) return;
+    if (!editPayment.paymentId || !editPayment.groupId || !editPayment.amount || !editPayment.monthIndex || !editPayment.slotId) {
+      setToastMsg({ text: "Please select slot, month, and amount.", type: "error" });
+      return;
+    }
+    try {
+      const monthIndexNum = Number(editPayment.monthIndex);
+      const amountNum = Number(editPayment.amount);
+      const payload = {
+        paymentId: editPayment.paymentId,
+        amount: editPayment.amount,
+        memberSlotId: editPayment.slotId,
+        reference: editPayment.utr || undefined,
+        adminNote: editPayment.note || undefined,
+        allocationSummary: JSON.stringify([
+          {
+            monthIndex: Math.max(0, Math.round(monthIndexNum) - 1),
+            amount: Number.isFinite(amountNum) ? amountNum : 0,
+          },
+        ]),
+      };
+      const res = await fetch("/api/admin/transactions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+      });
+      const data = (await res.json()) as UnknownRecord;
+      if (!res.ok || data.success === false) {
+        throw new Error(String(data.error ?? data.message ?? "Failed to update payment"));
+      }
+      setEditPayment(null);
+      if (viewingSubscriber?._id) {
+        await refreshMemberPayments(viewingSubscriber._id);
+        await refreshGroupProgress(viewingSubscriber._id);
+      }
+      setToastMsg({ text: "Payment updated", type: "success" });
+    } catch (err) {
+      setToastMsg({ text: String(err), type: "error" });
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -658,9 +1165,17 @@ export default function SubscribersPage() {
 
                     <td className="py-4 px-6">
                       <div className="flex gap-2">
-                        <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-[var(--bg-highlight)]" onClick={() => handleView(s)}>
-                          <Eye className="w-4 h-4 text-[var(--color-primary)]" />
-                        </Button>
+                        {s._id ? (
+                          <Link href={`/admin/members/${encodeURIComponent(s._id)}`}>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-[var(--bg-highlight)]">
+                              <Eye className="w-4 h-4 text-[var(--color-primary)]" />
+                            </Button>
+                          </Link>
+                        ) : (
+                          <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-[var(--bg-highlight)]" disabled>
+                            <Eye className="w-4 h-4 text-[var(--color-primary)]" />
+                          </Button>
+                        )}
                         <Button variant="ghost" size="icon" className="h-8 w-8 hover:bg-[var(--bg-highlight)]" onClick={() => openEditDialog(s)}>
                           <Edit className="w-4 h-4 text-[var(--color-primary)]" />
                         </Button>
@@ -728,8 +1243,329 @@ export default function SubscribersPage() {
                 </div>
               </div>
 
-              {/* RIGHT: Images */}
+              {/* RIGHT: Details */}
               <div className="md:col-span-8 grid grid-cols-1 gap-6 mt-10">
+                <div className="bg-[var(--bg-muted)] rounded-xl p-4 border border-[var(--border-color)]">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
+                    <div>
+                      <h4 className="text-sm font-semibold">Chit Groups & Slots</h4>
+                      <p className="text-xs text-[var(--text-secondary)]">All groups joined by this member. Add or remove slots directly.</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Select value={selectedGroupToAdd} onValueChange={setSelectedGroupToAdd}>
+                        <SelectTrigger className="h-9 w-52 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]">
+                          <SelectValue placeholder="Add to group" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[var(--bg-card)] text-[var(--text-primary)]">
+                          {availableGroupsForMember.length === 0 && (
+                            <SelectItem value="__none" disabled>No groups available</SelectItem>
+                          )}
+                          {availableGroupsForMember.map((g) => (
+                            <SelectItem key={String(g._id ?? g.name ?? "")} value={String(g._id ?? "")}>
+                              {String(g.name ?? "Unnamed Group")}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button size="sm" onClick={() => viewingSubscriber?._id && addMemberToSelectedGroup(viewingSubscriber._id)} disabled={!selectedGroupToAdd || selectedGroupToAdd === "__none"}>
+                        Add
+                      </Button>
+                    </div>
+                  </div>
+
+                  {memberGroupInfo.length === 0 ? (
+                    <div className="text-sm text-[var(--text-secondary)]">This member is not assigned to any group yet.</div>
+                  ) : (
+                    <div className="space-y-3">
+                      {memberGroupInfo.map(({ group, slots }) => {
+                        const groupId = String(group._id ?? "");
+                        const groupName = String(group.name ?? "Unnamed Group");
+                        const totalMembers = Math.max(1, toNum(group.totalMembers, 1));
+                        const monthlyInstallment = toNum(group.monthlyInstallment, 0);
+                        const perMemberInstallment = monthlyInstallment / totalMembers;
+                        const progress = groupProgress[groupId];
+                        const totalMonths = progress?.totalMonths || toNum(group.totalMonths, 0);
+                        const approvedForGroup = approvedPayments.filter((p) => getIdFromUnknown(p.groupId) === groupId);
+                        const approvedAmount = approvedForGroup.reduce((sum, p) => sum + toNum(p.amount, 0), 0);
+                        const expectedTotal = totalMonths > 0 ? perMemberInstallment * totalMonths * slots.length : 0;
+                        const pendingAmount = Math.max(0, expectedTotal - approvedAmount);
+
+                        return (
+                          <div key={groupId} className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-4">
+                            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                              <div>
+                                <div className="font-semibold">{groupName}</div>
+                                <div className="text-xs text-[var(--text-secondary)]">
+                                  {slots.length} slot(s) | Monthly/slot: Rs. {formatINR(perMemberInstallment)} | Total months: {totalMonths || "-"}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="text-xs text-[var(--text-secondary)]">Paid: Rs. {formatINR(approvedAmount)}</div>
+                                <div className="text-xs text-[var(--text-secondary)]">Pending: Rs. {formatINR(pendingAmount)}</div>
+                                <Button size="sm" variant="outline" onClick={() => viewingSubscriber?._id && addSlotToGroup(groupId, viewingSubscriber._id)}
+                                  className="whitespace-nowrap">Add Slot</Button>
+                              </div>
+                            </div>
+
+                            <div className="mt-3 space-y-2">
+                              {slots.map((slot) => {
+                                const row = progress?.rows?.find((r) => r.slotId === slot.slotId);
+                                const paidTill = row?.paidTillMonth ?? 0;
+                                const slotPaid = row?.monthAmounts?.reduce((sum, a) => sum + toNum(a.amount, 0), 0) ?? 0;
+                                const slotPenalty = row?.monthPenalties?.reduce((sum, p) => sum + toNum(p.penaltyAmount, 0), 0) ?? 0;
+                                return (
+                                  <div key={slot.slotId} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 rounded-md bg-[var(--bg-muted)] border border-[var(--border-color)] p-2">
+                                    <div>
+                                      <div className="text-sm font-medium">Slot: {slot.slotId}</div>
+                                      <div className="text-xs text-[var(--text-secondary)]">
+                                        Paid till month: {paidTill || 0} / {totalMonths || "-"} | Paid: Rs. {formatINR(slotPaid)} | Penalty: Rs. {formatINR(slotPenalty)}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      {row?.nextMonth ? (
+                                        <span className="text-xs text-[var(--text-secondary)]">Next month: {row.nextMonth}</span>
+                                      ) : null}
+                                      <Button size="sm" variant="outline" onClick={() => viewingSubscriber?._id && removeSlotFromGroup(groupId, slot.slotId, viewingSubscriber._id)}
+                                        className="whitespace-nowrap">Remove Slot</Button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-[var(--bg-muted)] rounded-xl p-4 border border-[var(--border-color)]">
+                  <div className="mb-3">
+                    <h4 className="text-sm font-semibold">New Chit Payment</h4>
+                    <p className="text-xs text-[var(--text-secondary)]">Create a payment request for this member and group. Approve from the list below.</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs text-[var(--text-secondary)]">Group</Label>
+                      <Select value={paymentForm.groupId} onValueChange={(v) => setPaymentForm((prev) => ({ ...prev, groupId: v, slotId: "", monthIndex: "" }))}>
+                        <SelectTrigger className="h-9 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]">
+                          <SelectValue placeholder="Select group" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[var(--bg-card)] text-[var(--text-primary)]">
+                          {memberGroupInfo.map(({ group }) => (
+                            <SelectItem key={String(group._id ?? group.name ?? "")} value={String(group._id ?? "")}>
+                              {String(group.name ?? "Unnamed Group")}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-[var(--text-secondary)]">Slot</Label>
+                      <Select value={paymentForm.slotId} onValueChange={(v) => setPaymentForm((prev) => ({ ...prev, slotId: v, monthIndex: "" }))} disabled={!selectedPaymentGroup}>
+                        <SelectTrigger className="h-9 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]">
+                          <SelectValue placeholder="Select slot" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[var(--bg-card)] text-[var(--text-primary)]">
+                          {selectedPaymentGroup?.slots?.map((s) => (
+                            <SelectItem key={s.slotId} value={s.slotId}>{s.slotId}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs text-[var(--text-secondary)]">Payment Month</Label>
+                      <Select
+                        value={paymentForm.monthIndex}
+                        onValueChange={(v) => setPaymentForm((prev) => ({ ...prev, monthIndex: v }))}
+                        disabled={!paymentForm.slotId || paymentMonthOptions.length === 0}
+                      >
+                        <SelectTrigger className="h-9 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]">
+                          <SelectValue placeholder={paymentForm.slotId ? "Select month" : "Select slot first"} />
+                        </SelectTrigger>
+                        <SelectContent className="bg-[var(--bg-card)] text-[var(--text-primary)]">
+                          {paymentMonthOptions.map((m) => {
+                            const paidAmount = selectedPaymentSlotRow?.monthAmounts?.find((x) => x.monthIndex === m)?.amount ?? 0;
+                            const penaltyAmount = selectedPaymentSlotRow?.monthPenalties?.find((x) => x.monthIndex === m)?.penaltyAmount ?? 0;
+                            const label = paidAmount > 0 || penaltyAmount > 0
+                              ? `Month ${m} (paid Rs. ${formatINR(toNum(paidAmount, 0))}${penaltyAmount ? `, penalty Rs. ${formatINR(toNum(penaltyAmount, 0))}` : ""})`
+                              : `Month ${m}`;
+                            return (
+                              <SelectItem key={`pm-${m}`} value={String(m)}>
+                                {label}
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                      {selectedPaymentSlotRow?.nextMonth ? (
+                        <p className="text-xs text-[var(--text-secondary)] mt-1">Suggested next month: {selectedPaymentSlotRow.nextMonth}</p>
+                      ) : null}
+                    </div>
+                    <div>
+                      <Label className="text-xs text-[var(--text-secondary)]">Amount</Label>
+                      <Input
+                        value={paymentForm.amount}
+                        onChange={(e) => setPaymentForm((prev) => ({ ...prev, amount: e.target.value }))}
+                        placeholder="Amount"
+                        className="h-9 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]"
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs text-[var(--text-secondary)]">UTR / Reference</Label>
+                      <Input
+                        value={paymentForm.utr}
+                        onChange={(e) => setPaymentForm((prev) => ({ ...prev, utr: e.target.value }))}
+                        placeholder="UTR or note"
+                        className="h-9 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <Label className="text-xs text-[var(--text-secondary)]">Admin Note</Label>
+                      <Input
+                        value={paymentForm.note}
+                        onChange={(e) => setPaymentForm((prev) => ({ ...prev, note: e.target.value }))}
+                        placeholder="Optional note"
+                        className="h-9 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]"
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-3 flex justify-end">
+                    <Button onClick={() => viewingSubscriber?._id && submitPayment(viewingSubscriber._id)} disabled={paymentSubmitting || !paymentForm.groupId || !paymentForm.slotId || !paymentForm.monthIndex || !paymentForm.amount}>
+                      {paymentSubmitting ? "Creating..." : "Create Payment"}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="bg-[var(--bg-muted)] rounded-xl p-4 border border-[var(--border-color)]">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h4 className="text-sm font-semibold">Chit Transactions</h4>
+                      <p className="text-xs text-[var(--text-secondary)]">Approved, pending, and rejected payments for this member.</p>
+                    </div>
+                    <div className="text-xs text-[var(--text-secondary)]">
+                      Approved total: Rs. {formatINR(approvedPayments.reduce((sum, p) => sum + toNum(p.amount, 0), 0))}
+                    </div>
+                  </div>
+
+                  {paymentsError && <div className="text-sm text-red-600">{paymentsError}</div>}
+                  {paymentsLoading ? (
+                    <div className="text-sm text-[var(--text-secondary)]">Loading payments...</div>
+                  ) : memberPayments.length === 0 ? (
+                    <div className="text-sm text-[var(--text-secondary)]">No transactions found.</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border-collapse">
+                        <thead>
+                          <tr className="border-b border-[var(--border-color)]">
+                            <th className="text-left py-2 px-2 font-semibold">Date</th>
+                            <th className="text-left py-2 px-2 font-semibold">Group</th>
+                        <th className="text-left py-2 px-2 font-semibold">Slot</th>
+                        <th className="text-left py-2 px-2 font-semibold">Month</th>
+                            <th className="text-right py-2 px-2 font-semibold">Amount</th>
+                            <th className="text-left py-2 px-2 font-semibold">Status</th>
+                            <th className="text-left py-2 px-2 font-semibold">UTR</th>
+                            <th className="text-right py-2 px-2 font-semibold">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {memberPayments.map((p) => {
+                            const groupName = groups?.find((g) => String((g as UnknownRecord)._id ?? "") === getIdFromUnknown(p.groupId))?.name ?? p.groupName ?? "-";
+                            const status = String(p.status ?? "pending");
+                            const created = p.createdAt ? new Date(String(p.createdAt)) : null;
+                            return (
+                              <tr key={String(p._id ?? Math.random())} className="border-b border-[var(--border-color)]">
+                                <td className="py-2 px-2 text-[var(--text-secondary)]">{created ? created.toLocaleDateString("en-IN") : "-"}</td>
+                                <td className="py-2 px-2">{String(groupName)}</td>
+                            <td className="py-2 px-2 text-[var(--text-secondary)]">{String(p.memberSlotId ?? "-")}</td>
+                            <td className="py-2 px-2 text-[var(--text-secondary)]">{getPaymentMonthIndex(p) || "-"}</td>
+                                <td className="py-2 px-2 text-right">Rs. {formatINR(toNum(p.amount, 0))}</td>
+                                <td className="py-2 px-2">
+                                  <Badge className={status === "approved" ? "bg-green-600 text-white" : status === "rejected" ? "bg-red-600 text-white" : "bg-yellow-600 text-white"}>
+                                    {status}
+                                  </Badge>
+                                </td>
+                                <td className="py-2 px-2 text-[var(--text-secondary)]">{String(p.utr ?? p.reference ?? "-")}</td>
+                                <td className="py-2 px-2 text-right">
+                                  <div className="flex justify-end gap-2">
+                                {status !== "approved" && (
+                                  <Button size="sm" variant="outline" onClick={() => approvePayment(String(p._id ?? ""))}>Approve</Button>
+                                )}
+                                {status === "pending" && (
+                                  <Button size="sm" variant="outline" onClick={() => openEditPayment(p)}>Edit</Button>
+                                )}
+                                {status !== "rejected" && (
+                                  <Button size="sm" variant="outline" onClick={() => rejectPayment(String(p._id ?? ""))}>Reject</Button>
+                                )}
+                                    <Button size="sm" variant="outline" onClick={() => deletePayment(String(p._id ?? ""))}>Delete</Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-[var(--bg-muted)] rounded-xl p-4 border border-[var(--border-color)]">
+                  <div className="mb-3">
+                    <h4 className="text-sm font-semibold">Loan Transactions</h4>
+                    <p className="text-xs text-[var(--text-secondary)]">Loan EMI payments made by this member.</p>
+                  </div>
+                  {loanError && <div className="text-sm text-red-600">{loanError}</div>}
+                  {loanLoading ? (
+                    <div className="text-sm text-[var(--text-secondary)]">Loading loan transactions...</div>
+                  ) : loanTxns.length === 0 ? (
+                    <div className="text-sm text-[var(--text-secondary)]">No loan transactions found.</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border-collapse">
+                        <thead>
+                          <tr className="border-b border-[var(--border-color)]">
+                            <th className="text-left py-2 px-2 font-semibold">Date</th>
+                            <th className="text-left py-2 px-2 font-semibold">Loan</th>
+                            <th className="text-left py-2 px-2 font-semibold">EMI</th>
+                            <th className="text-right py-2 px-2 font-semibold">Amount</th>
+                            <th className="text-left py-2 px-2 font-semibold">Status</th>
+                            <th className="text-left py-2 px-2 font-semibold">UTR</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {loanTxns.map((t) => {
+                            const created = t.date ? new Date(String(t.date)) : null;
+                            const statusVal = String(t.status ?? "").toLowerCase();
+                            return (
+                              <tr key={String(t._id ?? Math.random())} className="border-b border-[var(--border-color)]">
+                                <td className="py-2 px-2 text-[var(--text-secondary)]">{created ? created.toLocaleDateString("en-IN") : "-"}</td>
+                                <td className="py-2 px-2">{String(t.loanName ?? t.loanId ?? "-")}</td>
+                                <td className="py-2 px-2">Month {String(t.emiMonth ?? "-")}</td>
+                                <td className="py-2 px-2 text-right">Rs. {formatINR(toNum(t.amount, 0))}</td>
+                                <td className="py-2 px-2">
+                                  <Badge className={statusVal === "paid" ? "bg-green-600 text-white" : statusVal === "failed" ? "bg-red-600 text-white" : "bg-yellow-600 text-white"}>
+                                    {String(t.status ?? "Pending")}
+                                  </Badge>
+                                </td>
+                                <td className="py-2 px-2 text-[var(--text-secondary)]">{String(t.utr ?? t.referenceId ?? "-")}</td>
+                                <td className="py-2 px-2 text-right">
+                                  {statusVal === "paid" || statusVal === "failed" ? (
+                                    <span className="text-xs text-[var(--text-secondary)]">No action</span>
+                                  ) : (
+                                    <div className="flex justify-end gap-2">
+                                      <Button size="sm" variant="outline" onClick={() => updateLoanTransaction(String(t._id ?? ""), "approve")}>Approve</Button>
+                                      <Button size="sm" variant="outline" onClick={() => updateLoanTransaction(String(t._id ?? ""), "reject")}>Reject</Button>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="bg-[var(--bg-muted)] rounded-xl p-4 border border-[var(--border-color)] hover:shadow-lg transition-all flex flex-col">
                     <div className="flex items-center justify-between mb-3">
@@ -893,6 +1729,100 @@ export default function SubscribersPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {editPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="max-w-xl w-full max-h-[90vh] overflow-y-auto bg-[var(--bg-card)] text-[var(--text-primary)] rounded-xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Edit Payment</h2>
+              <Button variant="outline" onClick={() => setEditPayment(null)}>Close</Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="md:col-span-2">
+                <Label className="text-xs text-[var(--text-secondary)]">Group</Label>
+                <div className="h-9 flex items-center rounded-md border border-[var(--border-color)] px-3 bg-[var(--bg-muted)] text-sm">
+                  {String((memberGroupInfo.find((g) => String((g.group as UnknownRecord)?._id ?? "") === editPayment.groupId)?.group as UnknownRecord | undefined)?.name ?? "Group")}
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs text-[var(--text-secondary)]">Slot</Label>
+                <Select value={editPayment.slotId} onValueChange={(v) => setEditPayment((prev) => (prev ? { ...prev, slotId: v } : prev))}>
+                  <SelectTrigger className="h-9 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]">
+                    <SelectValue placeholder="Select slot" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[var(--bg-card)] text-[var(--text-primary)]">
+                    {(memberGroupInfo.find((g) => String((g.group as UnknownRecord)?._id ?? "") === editPayment.groupId)?.slots ?? []).map((s) => (
+                      <SelectItem key={`edit-slot-${s.slotId}`} value={s.slotId}>{s.slotId}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs text-[var(--text-secondary)]">Payment Month</Label>
+                <Select
+                  value={editPayment.monthIndex}
+                  onValueChange={(v) => setEditPayment((prev) => (prev ? { ...prev, monthIndex: v } : prev))}
+                  disabled={!editPayment.slotId || editPaymentTotalMonths <= 0}
+                >
+                  <SelectTrigger className="h-9 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]">
+                    <SelectValue placeholder={editPayment.slotId ? "Select month" : "Select slot first"} />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[var(--bg-card)] text-[var(--text-primary)]">
+                    {Array.from({ length: editPaymentTotalMonths || 0 }, (_, i) => i + 1).map((m) => {
+                      const paidAmount = editPaymentSlotRow?.monthAmounts?.find((x) => x.monthIndex === m)?.amount ?? 0;
+                      const penaltyAmount = editPaymentSlotRow?.monthPenalties?.find((x) => x.monthIndex === m)?.penaltyAmount ?? 0;
+                      const label = paidAmount > 0 || penaltyAmount > 0
+                        ? `Month ${m} (paid Rs. ${formatINR(toNum(paidAmount, 0))}${penaltyAmount ? `, penalty Rs. ${formatINR(toNum(penaltyAmount, 0))}` : ""})`
+                        : `Month ${m}`;
+                      return (
+                        <SelectItem key={`edit-month-${m}`} value={String(m)}>
+                          {label}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+                {editPaymentSlotRow?.nextMonth ? (
+                  <p className="text-xs text-[var(--text-secondary)] mt-1">Suggested next month: {editPaymentSlotRow.nextMonth}</p>
+                ) : null}
+              </div>
+              <div>
+                <Label className="text-xs text-[var(--text-secondary)]">Amount</Label>
+                <Input
+                  value={editPayment.amount}
+                  onChange={(e) => setEditPayment((prev) => (prev ? { ...prev, amount: e.target.value } : prev))}
+                  placeholder="Amount"
+                  className="h-9 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-[var(--text-secondary)]">UTR / Reference</Label>
+                <Input
+                  value={editPayment.utr}
+                  onChange={(e) => setEditPayment((prev) => (prev ? { ...prev, utr: e.target.value } : prev))}
+                  placeholder="UTR or note"
+                  className="h-9 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <Label className="text-xs text-[var(--text-secondary)]">Admin Note</Label>
+                <Input
+                  value={editPayment.note}
+                  onChange={(e) => setEditPayment((prev) => (prev ? { ...prev, note: e.target.value } : prev))}
+                  placeholder="Optional note"
+                  className="h-9 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <Button variant="outline" onClick={() => setEditPayment(null)}>Cancel</Button>
+              <Button onClick={updatePayment}>Save Changes</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

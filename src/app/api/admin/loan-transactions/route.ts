@@ -48,7 +48,22 @@ export async function GET(req: Request) {
 
     await dbConnect();
 
-    const transactions = await LoanTransaction.find({})
+    const url = new URL(req.url);
+    const memberIdParam = url.searchParams.get("memberId") ?? "";
+
+    const query: Record<string, unknown> = {};
+    if (memberIdParam) {
+      if (mongoose.Types.ObjectId.isValid(memberIdParam)) {
+        query.$or = [
+          { userId: memberIdParam },
+          { userId: new mongoose.Types.ObjectId(memberIdParam) },
+        ];
+      } else {
+        query.userId = memberIdParam;
+      }
+    }
+
+    const transactions = await LoanTransaction.find(query)
       .sort({ createdAt: -1 })
       .lean();
 
