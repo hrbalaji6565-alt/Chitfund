@@ -83,38 +83,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ loanId:
       return NextResponse.json({ success: false, message: "EMI already paid" }, { status: 400 });
     }
 
-    // Validate payment date - current date must be >= due date
-    const currentDate = new Date();
-    const dueDate = new Date(emi.dueDate);
-    
-    // Reset time to start of day for accurate comparison
-    currentDate.setHours(0, 0, 0, 0);
-    dueDate.setHours(0, 0, 0, 0);
-    
-    if (currentDate < dueDate) {
-      const dueDateFormatted = dueDate.toLocaleDateString("en-IN", {
-        day: "2-digit",
-        month: "2-digit", 
-        year: "numeric"
-      });
-      return NextResponse.json({ 
-        success: false, 
-        message: `Payment not allowed before due date. Payment will be enabled on ${dueDateFormatted}` 
-      }, { status: 400 });
-    }
-
-    // Validate that this is current month EMI only
-    const currentMonth = new Date().getMonth();
-    const currentYear = new Date().getFullYear();
-    const emiMonth = dueDate.getMonth();
-    const emiYear = dueDate.getFullYear();
-    
-    if (currentMonth !== emiMonth || currentYear !== emiYear) {
-      return NextResponse.json({ 
-        success: false, 
-        message: "Only current month EMI payments are allowed" 
-      }, { status: 400 });
-    }
+    // Allow early payment; due date and current-month restrictions removed
 
     const pendingAmount = Math.max(0, Number(emi.emiAmount ?? 0) - Number(emi.paidAmount ?? 0));
     if (!Number.isFinite(Number(amount)) || Number(amount) <= 0 || Number(amount) > pendingAmount) {

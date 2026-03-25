@@ -6,6 +6,14 @@ import Loan from "@/app/models/loanModel";
 import Member from "@/app/models/Member";
 import mongoose from "mongoose";
 
+type UnknownRecord = Record<string, unknown>;
+
+const toNumber = (v: unknown): number => {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
 function parseCookies(cookieHeader: string | null) {
   const map: Record<string, string> = {};
   if (!cookieHeader) return map;
@@ -238,5 +246,221 @@ export async function PATCH(req: Request) {
       { success: false, message: "Failed to update transaction" },
       { status: 500 }
     );
+  }
+}
+
+type PutBody = {
+  transactionId?: string;
+  emiMonth?: string | number;
+  amount?: string | number;
+  paymentMethod?: string;
+  utr?: string;
+  date?: string;
+};
+
+export async function PUT(req: Request) {
+  try {
+    if (!isAdmin(req)) {
+      return NextResponse.json({ success: false, message: "Invalid admin token" }, { status: 401 });
+    }
+
+    const body = (await req.json().catch(() => ({}))) as PutBody;
+    const transactionId = String(body.transactionId ?? "");
+
+    if (!transactionId) {
+      return NextResponse.json({ success: false, message: "transactionId is required" }, { status: 400 });
+    }
+
+    await dbConnect();
+
+    const tx = await LoanTransaction.findById(transactionId);
+    if (!tx) {
+      return NextResponse.json({ success: false, message: "Transaction not found" }, { status: 404 });
+    }
+
+    const loan = await Loan.findById(tx.loanId);
+    if (!loan) {
+      return NextResponse.json({ success: false, message: "Loan not found" }, { status: 404 });
+    }
+
+    const schedule = Array.isArray(loan.schedule) ? loan.schedule : [];
+    const findScheduleItem = (monthNumber: number) => {
+      return schedule.find((item: unknown) => {
+        const rec = item as Record<string, unknown>;
+        return Number(rec.monthNumber ?? 0) === monthNumber;
+      }) as Record<string, unknown> | undefined;
+    };
+
+    const recomputeNextDue = () => {
+      const nextUnpaid = schedule.find((item: unknown) => {
+        const rec = item as Record<string, unknown>;
+        return String(rec.status ?? "") !== "paid";
+      }) as Record<string, unknown> | undefined;
+      loan.nextEMIDueDate = nextUnpaid ? (nextUnpaid.dueDate as Date) : null;
+    };
+
+    const applyDeltaToSchedule = (item: Record<string, unknown>, delta: number, method?: string, utr?: string) => {
+      const emiAmount = Math.max(0, toNumber(item.emiAmount));
+      const currentPaid = Math.max(0, toNumber(item.paidAmount));
+      const newPaid = Math.max(0, currentPaid + delta);
+      item.paidAmount = newPaid;
+      if (newPaid <= 0) {
+        item.status = "pending";
+        item.paymentMode = null;
+        item.paymentDate = null;
+        item.transactionId = null;
+        item.utrNumber = null;
+        return;
+      }
+      item.status = newPaid >= emiAmount ? "paid" : "pending";
+      if (method) item.paymentMode = method;
+      if (utr) item.utrNumber = utr;
+      item.paymentDate = new Date();
+    };
+
+    const oldMonth = Number(tx.emiMonth ?? 0);
+    const oldAmount = Number(tx.amount ?? 0);
+    const isPaid = String(tx.status ?? "") === "Paid";
+
+    if (isPaid && oldMonth > 0) {
+      const oldItem = findScheduleItem(oldMonth);
+      if (oldItem) {
+        applyDeltaToSchedule(oldItem, -Math.max(0, oldAmount));
+      }
+    }
+
+    if (body.emiMonth !== undefined) {
+      const monthNum = Math.round(toNumber(body.emiMonth));
+      if (!Number.isFinite(monthNum) || monthNum <= 0) {
+        return NextResponse.json({ success: false, message: "Invalid emiMonth" }, { status: 400 });
+      }
+      const exists = Boolean(findScheduleItem(monthNum));
+      if (!exists) {
+        return NextResponse.json({ success: false, message: "EMI schedule item not found for this month" }, { status: 404 });
+      }
+      tx.emiMonth = monthNum;
+    }
+
+    if (body.amount !== undefined) {
+      const amountNum = Number(body.amount);
+      if (!Number.isFinite(amountNum) || amountNum <= 0) {
+        return NextResponse.json({ success: false, message: "Invalid amount" }, { status: 400 });
+      }
+      tx.amount = amountNum;
+    }
+
+    if (body.paymentMethod !== undefined) {
+      const method = String(body.paymentMethod ?? "").toUpperCase();
+      if (!["UPI", "CASH", "BANK"].includes(method)) {
+        return NextResponse.json({ success: false, message: "Invalid payment method" }, { status: 400 });
+      }
+      tx.paymentMethod = method as "UPI" | "CASH" | "BANK";
+    }
+
+    if (body.utr !== undefined) {
+      const utrVal = String(body.utr ?? "");
+      tx.utr = utrVal || undefined;
+      if (utrVal) {
+        tx.referenceId = utrVal;
+      }
+    }
+
+    if (body.date !== undefined) {
+      const d = new Date(String(body.date));
+      if (Number.isNaN(d.getTime())) {
+        return NextResponse.json({ success: false, message: "Invalid date" }, { status: 400 });
+      }
+      tx.transactionDate = d;
+    }
+
+    const newMonth = Number(tx.emiMonth ?? 0);
+    const newAmount = Number(tx.amount ?? 0);
+
+    if (isPaid && newMonth > 0) {
+      const newItem = findScheduleItem(newMonth);
+      if (!newItem) {
+        return NextResponse.json({ success: false, message: "EMI schedule item not found" }, { status: 404 });
+      }
+      const emiAmount = Math.max(0, toNumber(newItem.emiAmount));
+      const currentPaid = Math.max(0, toNumber(newItem.paidAmount));
+      const remaining = Math.max(0, emiAmount - currentPaid);
+      if (newAmount > remaining) {
+        return NextResponse.json({ success: false, message: `Amount exceeds remaining EMI. Remaining is ${remaining}` }, { status: 400 });
+      }
+      applyDeltaToSchedule(newItem, Math.max(0, newAmount), tx.paymentMethod, tx.utr ?? tx.referenceId ?? undefined);
+    }
+
+    recomputeNextDue();
+    await loan.save();
+    await tx.save();
+    return NextResponse.json({ success: true, transaction: tx });
+  } catch (error) {
+    console.error("Error editing admin loan transaction:", error);
+    return NextResponse.json({ success: false, message: "Failed to update transaction" }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    if (!isAdmin(req)) {
+      return NextResponse.json({ success: false, message: "Invalid admin token" }, { status: 401 });
+    }
+
+    const body = (await req.json().catch(() => ({}))) as UnknownRecord;
+    const transactionId = String(body.transactionId ?? "");
+
+    if (!transactionId) {
+      return NextResponse.json({ success: false, message: "transactionId is required" }, { status: 400 });
+    }
+
+    await dbConnect();
+
+    const tx = await LoanTransaction.findById(transactionId);
+    if (!tx) {
+      return NextResponse.json({ success: false, message: "Transaction not found" }, { status: 404 });
+    }
+
+    if (String(tx.status ?? "") === "Paid") {
+      const loan = await Loan.findById(tx.loanId);
+      if (!loan) {
+        return NextResponse.json({ success: false, message: "Loan not found" }, { status: 404 });
+      }
+      const schedule = Array.isArray(loan.schedule) ? loan.schedule : [];
+      const item = schedule.find((row: unknown) => {
+        const rec = row as Record<string, unknown>;
+        return Number(rec.monthNumber ?? 0) === Number(tx.emiMonth ?? 0);
+      }) as Record<string, unknown> | undefined;
+      if (item) {
+        const emiAmount = Math.max(0, toNumber(item.emiAmount));
+        const currentPaid = Math.max(0, toNumber(item.paidAmount));
+        const newPaid = Math.max(0, currentPaid - Math.max(0, Number(tx.amount ?? 0)));
+        item.paidAmount = newPaid;
+        if (newPaid <= 0) {
+          item.status = "pending";
+          item.paymentMode = null;
+          item.paymentDate = null;
+          item.transactionId = null;
+          item.utrNumber = null;
+        } else {
+          item.status = newPaid >= emiAmount ? "paid" : "pending";
+          if (newPaid < emiAmount) {
+            item.paymentDate = null;
+          }
+        }
+      }
+
+      const nextUnpaid = schedule.find((row: unknown) => {
+        const rec = row as Record<string, unknown>;
+        return String(rec.status ?? "") !== "paid";
+      }) as Record<string, unknown> | undefined;
+      loan.nextEMIDueDate = nextUnpaid ? (nextUnpaid.dueDate as Date) : null;
+      await loan.save();
+    }
+
+    await LoanTransaction.findByIdAndDelete(transactionId);
+    return NextResponse.json({ success: true, message: "Transaction deleted" });
+  } catch (error) {
+    console.error("Error deleting admin loan transaction:", error);
+    return NextResponse.json({ success: false, message: "Failed to delete transaction" }, { status: 500 });
   }
 }

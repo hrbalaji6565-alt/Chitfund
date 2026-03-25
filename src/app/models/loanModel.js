@@ -8,7 +8,7 @@ const LoanScheduleSchema = new mongoose.Schema(
     penalty: { type: Number, default: 0 },
     paidAmount: { type: Number, default: 0 },
     status: { type: String, default: "pending" },
-    paymentMode: { type: String, enum: ["UPI", "CASH"], default: null },
+    paymentMode: { type: String, enum: ["UPI", "CASH", "BANK"], default: null },
     paymentDate: { type: Date, default: null },
     transactionId: { type: String, default: null },
     utrNumber: { type: String, default: null },

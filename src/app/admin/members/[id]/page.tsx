@@ -155,6 +155,15 @@ export default function AdminMemberDetailPage() {
   const [loanTxns, setLoanTxns] = useState<UnknownRecord[]>([]);
   const [loanLoading, setLoanLoading] = useState(false);
   const [loanError, setLoanError] = useState<string | null>(null);
+  const [editLoanTx, setEditLoanTx] = useState<{
+    transactionId: string;
+    loanId: string;
+    emiMonth: string;
+    amount: string;
+    paymentMethod: string;
+    utr: string;
+    date: string;
+  } | null>(null);
 
   const [groupProgress, setGroupProgress] = useState<Record<string, { totalMonths: number; rows: Array<{
     slotId: string;
@@ -562,6 +571,75 @@ export default function AdminMemberDetailPage() {
     }
   };
 
+  const openEditLoanTx = (t: UnknownRecord) => {
+    const txId = String(t._id ?? "");
+    if (!txId) return;
+    const dateObj = t.date ? new Date(String(t.date)) : null;
+    const dateVal = dateObj ? dateObj.toISOString().split("T")[0] : "";
+    setEditLoanTx({
+      transactionId: txId,
+      loanId: String(t.loanId ?? ""),
+      emiMonth: String(t.emiMonth ?? ""),
+      amount: String(t.amount ?? ""),
+      paymentMethod: String(t.paymentMethod ?? "UPI"),
+      utr: String(t.utr ?? t.referenceId ?? ""),
+      date: dateVal,
+    });
+  };
+
+  const saveEditLoanTx = async () => {
+    if (!editLoanTx?.transactionId) return;
+    try {
+      const payload = {
+        transactionId: editLoanTx.transactionId,
+        emiMonth: editLoanTx.emiMonth,
+        amount: editLoanTx.amount,
+        paymentMethod: editLoanTx.paymentMethod,
+        utr: editLoanTx.utr || undefined,
+        date: editLoanTx.date || undefined,
+      };
+      const res = await fetch("/api/admin/loan-transactions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+      });
+      const data = (await res.json()) as UnknownRecord;
+      if (!res.ok || data.success === false) {
+        throw new Error(String(data.message ?? data.error ?? "Failed to update loan transaction"));
+      }
+      setEditLoanTx(null);
+      if (memberId) {
+        await refreshLoanTransactions(memberId);
+      }
+      setToastMsg({ text: "Loan transaction updated", type: "success" });
+    } catch (err) {
+      setToastMsg({ text: String(err), type: "error" });
+    }
+  };
+
+  const deleteLoanTx = async (transactionId: string) => {
+    if (typeof window !== "undefined" && !window.confirm("Delete this loan transaction? This cannot be undone.")) return;
+    try {
+      const res = await fetch("/api/admin/loan-transactions", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transactionId }),
+        credentials: "include",
+      });
+      const data = (await res.json()) as UnknownRecord;
+      if (!res.ok || data.success === false) {
+        throw new Error(String(data.message ?? data.error ?? "Failed to delete loan transaction"));
+      }
+      if (memberId) {
+        await refreshLoanTransactions(memberId);
+      }
+      setToastMsg({ text: "Loan transaction deleted", type: "success" });
+    } catch (err) {
+      setToastMsg({ text: String(err), type: "error" });
+    }
+  };
+
   const addSlotToGroup = async (groupId: string, id: string) => {
     if (!groupId || !id) return;
     const group = groups.find((g) => String((g as UnknownRecord)._id ?? "") === groupId);
@@ -645,6 +723,10 @@ export default function AdminMemberDetailPage() {
     const rows = memberPayments.filter((p) => String(p.status ?? "") === "approved");
     return rows;
   }, [memberPayments]);
+
+  const approvedTotalPaid = useMemo(() => {
+    return approvedPayments.reduce((sum, p) => sum + toNum(p.amount, 0), 0);
+  }, [approvedPayments]);
 
   const selectedPaymentGroup = useMemo(() => {
     if (!paymentForm.groupId) return null;
@@ -866,7 +948,7 @@ export default function AdminMemberDetailPage() {
               <h4 className="text-sm font-semibold mb-3">Notes & Metadata</h4>
               <div className="text-sm text-[var(--text-secondary)] space-y-2">
                 <div className="flex justify-between"><strong>Member ID:</strong> <span className="truncate max-w-[60%] text-right">{memberRecord._id ?? "-"}</span></div>
-                <div className="flex justify-between"><strong>Total Paid:</strong> <span>Rs. {Number(memberRecord.totalPaid ?? 0).toLocaleString("en-IN")}</span></div>
+                <div className="flex justify-between"><strong>Total Paid:</strong> <span>Rs. {formatINR(approvedTotalPaid)}</span></div>
                 <div className="flex justify-between"><strong>Pending:</strong> <span>Rs. {Number(memberRecord.pendingAmount ?? 0).toLocaleString("en-IN")}</span></div>
               </div>
             </div>
@@ -1202,11 +1284,16 @@ export default function AdminMemberDetailPage() {
                             <td className="py-2 px-2 text-[var(--text-secondary)]">{String(t.utr ?? t.referenceId ?? "-")}</td>
                             <td className="py-2 px-2 text-right">
                               {statusVal === "paid" || statusVal === "failed" ? (
-                                <span className="text-xs text-[var(--text-secondary)]">No action</span>
+                                <div className="flex justify-end gap-2">
+                                  <Button size="sm" variant="outline" onClick={() => openEditLoanTx(t)}>Edit</Button>
+                                  <Button size="sm" variant="outline" onClick={() => deleteLoanTx(String(t._id ?? ""))}>Delete</Button>
+                                </div>
                               ) : (
                                 <div className="flex justify-end gap-2">
                                   <Button size="sm" variant="outline" onClick={() => updateLoanTransaction(String(t._id ?? ""), "approve")}>Approve</Button>
                                   <Button size="sm" variant="outline" onClick={() => updateLoanTransaction(String(t._id ?? ""), "reject")}>Reject</Button>
+                                  <Button size="sm" variant="outline" onClick={() => openEditLoanTx(t)}>Edit</Button>
+                                  <Button size="sm" variant="outline" onClick={() => deleteLoanTx(String(t._id ?? ""))}>Delete</Button>
                                 </div>
                               )}
                             </td>
@@ -1462,6 +1549,73 @@ export default function AdminMemberDetailPage() {
             <div className="flex justify-end gap-3 mt-6">
               <Button variant="outline" onClick={() => setEditPayment(null)}>Cancel</Button>
               <Button onClick={updatePayment}>Save Changes</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editLoanTx && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="max-w-xl w-full max-h-[90vh] overflow-y-auto bg-[var(--bg-card)] text-[var(--text-primary)] rounded-xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Edit Loan Transaction</h2>
+              <Button variant="outline" onClick={() => setEditLoanTx(null)}>Close</Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label className="text-xs text-[var(--text-secondary)]">EMI Month</Label>
+                <Input
+                  value={editLoanTx.emiMonth}
+                  onChange={(e) => setEditLoanTx((prev) => (prev ? { ...prev, emiMonth: e.target.value } : prev))}
+                  placeholder="Month number"
+                  className="h-9 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-[var(--text-secondary)]">Amount</Label>
+                <Input
+                  value={editLoanTx.amount}
+                  onChange={(e) => setEditLoanTx((prev) => (prev ? { ...prev, amount: e.target.value } : prev))}
+                  placeholder="Amount"
+                  className="h-9 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-[var(--text-secondary)]">Payment Method</Label>
+                <select
+                  value={editLoanTx.paymentMethod}
+                  onChange={(e) => setEditLoanTx((prev) => (prev ? { ...prev, paymentMethod: e.target.value } : prev))}
+                  className="w-full h-9 rounded-md px-3 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]"
+                >
+                  <option value="UPI">UPI</option>
+                  <option value="CASH">CASH</option>
+                  <option value="BANK">BANK</option>
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs text-[var(--text-secondary)]">Date</Label>
+                <Input
+                  type="date"
+                  value={editLoanTx.date}
+                  onChange={(e) => setEditLoanTx((prev) => (prev ? { ...prev, date: e.target.value } : prev))}
+                  className="h-9 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <Label className="text-xs text-[var(--text-secondary)]">UTR / Reference</Label>
+                <Input
+                  value={editLoanTx.utr}
+                  onChange={(e) => setEditLoanTx((prev) => (prev ? { ...prev, utr: e.target.value } : prev))}
+                  placeholder="UTR or note"
+                  className="h-9 bg-[var(--bg-card)] text-[var(--text-primary)] border-[var(--border-color)]"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <Button variant="outline" onClick={() => setEditLoanTx(null)}>Cancel</Button>
+              <Button onClick={saveEditLoanTx}>Save Changes</Button>
             </div>
           </div>
         </div>
